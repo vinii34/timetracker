@@ -1,0 +1,119 @@
+<Window x:Class="TimeTracker.UI.TaskManagerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TimeTracker — Gérer les tâches"
+        Width="700" Height="560" MinWidth="560" MinHeight="460"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="#FAFAFA">
+    <Window.Resources>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#777"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel Margin="16">
+
+        <TextBlock DockPanel.Dock="Top" Text="Gérer les tâches"
+                   FontSize="17" FontWeight="SemiBold"/>
+        <TextBlock DockPanel.Dock="Top" Style="{StaticResource Hint}" Margin="0,4,0,12"
+                   Text="Corrige une faute de frappe, fusionne deux doublons, épingle en favori (★) les tâches proposées en tête du sélecteur. Renommer une tâche corrige aussi tout l'historique déjà enregistré."/>
+
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+            <TextBlock Text="Filtrer" VerticalAlignment="Center" Margin="0,0,8,0"/>
+            <CheckBox x:Name="FavoritesOnlyCheck" DockPanel.Dock="Right" Content="Favoris seulement"
+                      VerticalAlignment="Center" Margin="10,0,0,0" Click="Filter_Changed"/>
+            <TextBox x:Name="FilterBox" Padding="6,4" TextChanged="FilterBox_TextChanged"/>
+        </DockPanel>
+
+        <!-- Doublons probables (même nom à une coquille, un accent ou un espace près) :
+             un bouton par paire, masqué quand il n'y en a pas. Calculé sur le poste. -->
+        <Border x:Name="DuplicatePanel" DockPanel.Dock="Top" Visibility="Collapsed"
+                Background="#FFF8E1" BorderBrush="#F0D890" BorderThickness="1" CornerRadius="4"
+                Padding="10,8" Margin="0,0,0,10">
+            <StackPanel>
+                <TextBlock Text="Doublons probables" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                <ItemsControl x:Name="DuplicateList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel Margin="0,2">
+                                <Button DockPanel.Dock="Right" Content="Fusionner" Padding="8,2"
+                                        Margin="8,0,0,0" Tag="{Binding}" Click="MergeDuplicate_Click"/>
+                                <TextBlock Text="{Binding Text, Mode=OneWay}" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           ToolTip="{Binding Text, Mode=OneWay}"/>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </Border>
+
+        <!-- Déclaré avant le panneau d'édition : dans un DockPanel, le premier docké
+             occupe le bord extérieur — sinon le bouton se glisse au-dessus du panneau. -->
+        <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+            <Button DockPanel.Dock="Right" Content="Fermer" Padding="14,5" IsCancel="True" Click="Close_Click"/>
+            <Button x:Name="AiButton" DockPanel.Dock="Left" Content="✨ Proposer avec l'IA…" Padding="12,5"
+                    HorizontalAlignment="Left" Click="Ai_Click"
+                    ToolTip="Envoie les noms des tâches au fournisseur choisi dans Paramètres > Assistant IA et propose fusions et renommages, à cocher."/>
+            <TextBlock x:Name="AiStatusText" VerticalAlignment="Center" Margin="10,0" Foreground="#777"
+                       FontSize="11" TextTrimming="CharacterEllipsis"/>
+        </DockPanel>
+
+        <!-- ======================================== Panneau d'édition (bas) -->
+        <Border DockPanel.Dock="Bottom" BorderBrush="#DDD" BorderThickness="1" CornerRadius="4"
+                Background="White" Padding="14" Margin="0,12,0,0">
+            <StackPanel>
+                <TextBlock x:Name="SelectionText" FontWeight="SemiBold" Margin="0,0,0,10"
+                           TextTrimming="CharacterEllipsis" Text="Aucune tâche sélectionnée"/>
+
+                <DockPanel Margin="0,0,0,10">
+                    <Button x:Name="RenameButton" DockPanel.Dock="Right" Content="Renommer"
+                            Padding="12,5" Margin="8,0,0,0" Click="Rename_Click"/>
+                    <TextBox x:Name="NameBox" Padding="6,4" VerticalContentAlignment="Center"
+                             KeyDown="NameBox_KeyDown"/>
+                </DockPanel>
+
+                <DockPanel Margin="0,0,0,10">
+                    <TextBlock Text="Fusionner dans" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <Button x:Name="MergeButton" DockPanel.Dock="Right" Content="Fusionner"
+                            Padding="12,5" Margin="8,0,0,0" Click="Merge_Click"/>
+                    <ComboBox x:Name="MergeTargetBox" Padding="6,4"/>
+                </DockPanel>
+
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="FavoriteButton" Content="★ Ajouter aux favoris" Padding="12,5"
+                            Margin="0,0,8,0" Click="ToggleFavorite_Click"/>
+                    <Button x:Name="DeleteButton" Content="🗑 Supprimer" Padding="12,5"
+                            Click="Delete_Click"/>
+                </StackPanel>
+
+                <TextBlock x:Name="MessageText" TextWrapping="Wrap" Margin="0,10,0,0"
+                           Visibility="Collapsed"/>
+            </StackPanel>
+        </Border>
+
+        <ListView x:Name="TaskList"
+                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                  HorizontalContentAlignment="Stretch"
+                  SelectionChanged="TaskList_SelectionChanged"
+                  MouseDoubleClick="TaskList_MouseDoubleClick">
+            <ListView.View>
+                <GridView>
+                    <GridViewColumn Header="★" Width="30"
+                        DisplayMemberBinding="{Binding Star, Mode=OneWay}"/>
+                    <GridViewColumn x:Name="NameColumn" Header="Tâche" Width="300"
+                        DisplayMemberBinding="{Binding Name, Mode=OneWay}"/>
+                    <GridViewColumn Header="Entrées" Width="70"
+                        DisplayMemberBinding="{Binding Entries, Mode=OneWay}"/>
+                    <GridViewColumn Header="Total" Width="80"
+                        DisplayMemberBinding="{Binding Total, Mode=OneWay}"/>
+                    <GridViewColumn Header="Dernière fois" Width="110"
+                        DisplayMemberBinding="{Binding LastUsed, Mode=OneWay}"/>
+                </GridView>
+            </ListView.View>
+        </ListView>
+    </DockPanel>
+</Window>

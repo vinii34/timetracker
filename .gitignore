@@ -1,0 +1,12 @@
+# Build .NET
+bin/
+obj/
+.vs/
+*.user
+
+# Journaux d'activité (données perso)
+logs/
+*.log
+
+# Claude Code (réglages perso)
+.claude/settings.local.json

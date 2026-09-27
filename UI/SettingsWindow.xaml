@@ -1,0 +1,269 @@
+<Window x:Class="TimeTracker.UI.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="TimeTracker — Paramètres"
+        Width="500" SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterScreen"
+        ShowInTaskbar="False"
+        Background="#FAFAFA">
+    <Window.Resources>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="BorderBrush" Value="#DDD"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="4"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="Padding" Value="14"/>
+            <Setter Property="Margin" Value="0,0,0,12"/>
+        </Style>
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#777"/>
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+    </Window.Resources>
+
+    <!--
+        Trois lignes plutôt qu'un StackPanel : sur un écran de portable à 150 %, la hauteur
+        utile n'est que d'environ 670 points, et cette fenêtre en fait davantage. Les réglages
+        défilent ; le titre et les boutons restent visibles. La MaxHeight est posée dans le
+        code-behind, SystemParameters.WorkArea ne se liant pas proprement en XAML.
+    -->
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0" Text="Paramètres" FontSize="17" FontWeight="SemiBold"
+                   Margin="0,0,0,16"/>
+
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled" Padding="0,0,4,0">
+        <StackPanel>
+
+        <!-- ================================================= Rappels -->
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Text="Rappels" Style="{StaticResource SectionTitle}"/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Me redemander toutes les" VerticalAlignment="Center"
+                               Margin="0,0,10,0"/>
+                    <ComboBox x:Name="IntervalBox" IsEditable="True" Width="70" Padding="6,3"/>
+                    <TextBlock Text="minutes" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                </StackPanel>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,10"
+                           Text="Popup « Toujours sur cette tâche ? ». Répondre « Non » rouvre le sélecteur."/>
+
+                <CheckBox x:Name="SoundCheck" Content="Jouer un son lors des rappels" Margin="0,0,0,8"/>
+                <CheckBox x:Name="AskOnStartupCheck"
+                          Content="Demander la tâche au lancement de l'application"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ================================================= Absences -->
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Text="Fin de journée et absences" Style="{StaticResource SectionTitle}"/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Clôturer la tâche en cours après" VerticalAlignment="Center"
+                               Margin="0,0,10,0"/>
+                    <TextBox x:Name="AbsenceBox" Width="60" Padding="6,3"/>
+                    <TextBlock Text="minutes d'absence" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                </StackPanel>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
+                           Text="Absence = poste verrouillé ou en veille. Au retour, l'entrée est clôturée à l'heure où le poste a été quitté (pas au réveil) et le suivi passe en pause : le rappel « Toujours en pause ? » propose alors de reprendre ou de changer de tâche. Évite l'entrée qui court toute la nuit quand on ferme le portable sans arrêter la tâche. 0 pour désactiver."/>
+
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                    <TextBlock Text="Objectif d'heures" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                    <TextBox x:Name="GoalBox" Width="60" Padding="6,3"/>
+                    <TextBlock Text="h" VerticalAlignment="Center" Margin="6,0,6,0"/>
+                    <ComboBox x:Name="GoalUnitBox" Width="110" Padding="6,3" SelectionChanged="GoalUnit_Changed">
+                        <ComboBoxItem Content="par jour"/>
+                        <ComboBoxItem Content="par semaine"/>
+                    </ComboBox>
+                    <TextBlock Text="(0 = aucun)" VerticalAlignment="Center" Margin="8,0,0,0" Foreground="#777"/>
+                </StackPanel>
+                <TextBlock Style="{StaticResource Hint}"
+                           Text="Une semaine compte cinq jours : 7,5 h par jour = 37,5 h par semaine. Changer d'unité convertit la valeur. Le tableau de bord affiche le reste à faire du jour et l'avancement de la semaine."/>
+            </StackPanel>
+        </Border>
+
+        <!-- ============================================= Suggestions -->
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Text="Suggestions de tâche" Style="{StaticResource SectionTitle}"/>
+
+                <CheckBox x:Name="ActivityCheck" Margin="0,0,0,4"
+                          Content="Suggérer la tâche d'après les fenêtres utilisées"/>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
+                           Text="Compare les mots des titres de fenêtres au premier plan (« Orvane - mapping.xlsx ») aux mots des noms de tâches (« Config Orvane »). La tâche suggérée passe en tête du sélecteur avec sa raison, et le rappel le signale si elle contredit la tâche en cours. Rien ne bascule tout seul. Le relevé des fenêtres vit en mémoire (30 min) et disparaît avec l'application."/>
+
+                <CheckBox x:Name="LearningCheck" Margin="0,0,0,4"
+                          Content="Apprendre quelles fenêtres accompagnent chaque tâche"/>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,8"
+                           Text="Pendant qu'une tâche tourne, les mots des titres de fenêtres vus sont comptés pour elle, en base, sur ce poste (table task_hints : tâche, mot, secondes — jamais un titre entier). Une fenêtre déjà vue dix minutes avec « Kestrio Siren seul » suggérera cette tâche même si son nom ne dit pas « Kestrio ». C'est la seule chose que TimeTracker enregistre à partir de tes fenêtres."/>
+                <Button x:Name="ForgetButton" Content="Oublier ce qui a été appris" Padding="10,4"
+                        HorizontalAlignment="Left" Click="Forget_Click"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ============================================ Assistant IA -->
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Text="Assistant IA (optionnel)" Style="{StaticResource SectionTitle}"/>
+
+                <CheckBox x:Name="AiCheck" Margin="0,0,0,4"
+                          Content="Autoriser l'assistant à proposer des regroupements de tâches"/>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
+                           Text="Bouton « Proposer avec l'IA » dans « Gérer les tâches ». Seuls les NOMS de tes tâches (et leur nombre d'entrées) sont envoyés au fournisseur choisi, uniquement quand tu cliques — jamais les heures, jamais les titres de fenêtres. C'est la seule fonction qui fait sortir quelque chose de ce poste ; avec un modèle local (Ollama, LM Studio) en « compatible OpenAI », rien n'en sort. Tu coches ensuite ce que tu appliques."/>
+
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="110"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Fournisseur" VerticalAlignment="Center" Margin="0,0,0,6"/>
+                    <ComboBox Grid.Row="0" Grid.Column="1" x:Name="AiProviderBox" Padding="6,3" Margin="0,0,0,6"
+                              SelectionChanged="AiProvider_Changed"/>
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Clé API" VerticalAlignment="Center" Margin="0,0,0,6"/>
+                    <PasswordBox Grid.Row="1" Grid.Column="1" x:Name="AiKeyBox" Padding="6,3" Margin="0,0,0,6"/>
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Modèle" VerticalAlignment="Center" Margin="0,0,0,6"/>
+                    <TextBox Grid.Row="2" Grid.Column="1" x:Name="AiModelBox" Padding="6,3" Margin="0,0,0,6"/>
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Adresse API" VerticalAlignment="Center"/>
+                    <TextBox Grid.Row="3" Grid.Column="1" x:Name="AiUrlBox" Padding="6,3"/>
+                </Grid>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,8"
+                           Text="Gemini : clé gratuite sur aistudio.google.com (les modèles « Flash Lite » ont 500 requêtes par jour, les « Flash » 20). Adresse API : seulement pour « compatible OpenAI » (Ollama local : http://localhost:11434/v1, clé vide). La clé est stockée dans la base locale, en clair."/>
+
+                <DockPanel>
+                    <Button x:Name="AiTestButton" DockPanel.Dock="Left" Content="Tester la connexion" Padding="10,4"
+                            Margin="0,0,10,0" Click="AiTest_Click"/>
+                    <TextBlock x:Name="AiTestText" VerticalAlignment="Center" TextWrapping="Wrap"
+                               Foreground="#555" FontSize="11"/>
+                </DockPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- ================================================= Réunions -->
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Text="Réunions" Style="{StaticResource SectionTitle}"/>
+
+                <CheckBox x:Name="MeetingCheck" Margin="0,0,0,4"
+                          Content="Détecter les réunions et basculer automatiquement"/>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
+                           Text="Détectée quand une application de réunion (Teams, Zoom, ou un onglet Meet) capte le micro. Une notification permet d'annuler la bascule ; la tâche précédente reprend à la fin de la réunion, et les rappels sont mis en sommeil pendant."/>
+
+                <TextBlock Text="Tâche utilisée pour les réunions" Margin="0,0,0,4"/>
+                <TextBox x:Name="MeetingTaskBox" Padding="6,4"/>
+            </StackPanel>
+        </Border>
+
+        <!-- =============================================== Agenda -->
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Text="Agenda Outlook" Style="{StaticResource SectionTitle}"/>
+
+                <CheckBox x:Name="OutlookCheck" Margin="0,0,0,4"
+                          Content="Lire l'agenda pour nommer les réunions"/>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
+                           Text="Lit l'Outlook classique déjà ouvert sur ce poste : aucune connexion, rien ne sort de la machine. Le sujet de la réunion sert alors de libellé — c'est la seule façon de nommer une réunion Zoom. Sans effet si Outlook est fermé."/>
+
+                <CheckBox x:Name="OutlookAskCheck" Margin="0,0,0,4"
+                          Content="Demander s'il faut pointer une réunion prévue à l'agenda"/>
+                <TextBlock Style="{StaticResource Hint}"
+                           Text="La question est posée au début du créneau, et seulement si aucune réunion n'est déjà en cours. Sans réponse, ou sur un « non », rien ne bascule — mais si tu y participes quand même, la détection automatique prend le relais et la réunion porte le bon nom."/>
+            </StackPanel>
+        </Border>
+
+        <!-- =============================================== Raccourcis -->
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Text="Raccourcis globaux" Style="{StaticResource SectionTitle}"/>
+
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="170"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Changer de tâche" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1" x:Name="HotkeyTaskBox" IsReadOnly="True"
+                             Padding="6,4" TextAlignment="Center"
+                             PreviewKeyDown="HotkeyBox_PreviewKeyDown"/>
+                </Grid>
+
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="170"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Correction à chaud" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1" x:Name="HotkeyEditBox" IsReadOnly="True"
+                             Padding="6,4" TextAlignment="Center"
+                             PreviewKeyDown="HotkeyBox_PreviewKeyDown"/>
+                </Grid>
+
+                <Grid Margin="0,0,0,8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="170"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Pause / reprise" VerticalAlignment="Center"/>
+                    <TextBox Grid.Column="1" x:Name="HotkeyPauseBox" IsReadOnly="True"
+                             Padding="6,4" TextAlignment="Center"
+                             PreviewKeyDown="HotkeyBox_PreviewKeyDown"/>
+                </Grid>
+
+                <TextBlock Style="{StaticResource Hint}"
+                           Text="Clique dans un champ puis compose la combinaison (au moins un modificateur : Ctrl, Alt, Maj ou Win)."/>
+            </StackPanel>
+        </Border>
+
+        <!-- =================================================== Divers -->
+        <Border Style="{StaticResource Card}">
+            <StackPanel>
+                <TextBlock Text="Système et export" Style="{StaticResource SectionTitle}"/>
+
+                <CheckBox x:Name="StartupCheck" Content="Démarrer TimeTracker avec Windows"
+                          Margin="0,0,0,4"/>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
+                           Text="Ajoute (ou retire) une entrée dans HKCU\...\Run. N'affecte que ta session Windows."/>
+
+                <TextBlock Text="Dossier d'export par défaut" Margin="0,0,0,4"/>
+                <DockPanel>
+                    <Button Content="Parcourir…" Padding="10,4" Margin="8,0,0,0"
+                            DockPanel.Dock="Right" Click="BrowseFolder_Click"/>
+                    <TextBox x:Name="ExportFolderBox" Padding="6,4"/>
+                </DockPanel>
+            </StackPanel>
+        </Border>
+
+        </StackPanel>
+        </ScrollViewer>
+
+        <StackPanel Grid.Row="2">
+            <TextBlock x:Name="ErrorText" Foreground="#C0392B" TextWrapping="Wrap"
+                       Margin="0,8,0,4" Visibility="Collapsed"/>
+
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,6,0,0">
+                <Button Content="Annuler" Padding="14,5" Margin="0,0,8,0"
+                        IsCancel="True" Click="Cancel_Click"/>
+                <Button Content="Enregistrer" Padding="14,5" IsDefault="True" Click="Save_Click"/>
+            </StackPanel>
+        </StackPanel>
+    </Grid>
+</Window>
