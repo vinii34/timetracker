@@ -2,23 +2,209 @@
 
 > Pour reprendre le projet dans une nouvelle session. Lis d'abord ce fichier,
 > puis `README.md`. `CLAUDE.md` (chargé automatiquement) en donne le résumé et pointe ici.
-> État au **2026-09-17** : **cinq semaines d'usage réel supplémentaires dépouillées** (3e
-> collecte, 2026-08-10 → 09-15). L'agenda Outlook marche sur le poste de travail ; ce que la
-> collecte a montré et ce qui a été fait ce jour-là est en §0. **v1.4 packagée.**
+> État au **2026-09-29** : **4e collecte dépouillée** (2026-09-17 → 29, première avec les
+> suggestions de la v1.6) et **suggestions refaites en v1.7**, packagée, **en test chez
+> l'utilisateur** depuis le 29/09 après-midi. Tout est en §0, section « 4e collecte ».
+> Le projet tourne désormais **sur le poste de travail** (celui du vrai relevé) : pièges propres
+> à ce poste en §8.
 
 ---
 
 ## 0. À la reprise — où on en est exactement
 
-Il y a eu **trois collectes**, et il faut lire les trois : la première a réglé la détection, la
-seconde a montré que le résultat n'arrivait pas jusqu'à l'utilisateur, la troisième — la
-première avec l'agenda Outlook — a montré que les réunions qui se suivent se fondaient en une.
+Il y a eu **quatre collectes** : la première a réglé la détection, la seconde a montré que le
+résultat n'arrivait pas jusqu'à l'utilisateur, la troisième — la première avec l'agenda
+Outlook — a montré que les réunions qui se suivent se fondaient en une, la quatrième a montré
+que les suggestions de tâche ne pouvaient pas marcher telles qu'elles étaient conçues.
 
 | | journaux | jours | bascules |
 |---|---|---|---|
 | 1re collecte | `logs/TimeTracker-journaux-20260802-1036/` | 2026-07-27 → 31 | 14 |
 | 2e collecte | `logs/TimeTracker-journaux-20260809-1516/` | 2026-08-03 → 07 | 13 |
 | 3e collecte | `logs/TimeTracker-journaux-20260917-0822/` | 2026-08-10 → 09-15 (20 jours) | 54 |
+| 4e collecte | `logs/TimeTracker-journaux-20260928-0911/` + `%APPDATA%` du 29/09 | 2026-09-17 → 29 (9 jours) | 19 |
+
+### 4e collecte (2026-09-17 → 29, dépouillée le 2026-09-29) — les suggestions refaites (v1.7)
+
+⚠️ Le `log.txt` du dossier contient tout depuis le 2026-06-29 : la nouveauté commence à la ligne
+814 (2026-09-17 10:08) et s'arrête au 25/09 ; le 28 et le 29/09 ont été lus directement dans
+`%APPDATA%\TimeTracker\log.txt`. Le `meetingtrace.log` ne couvre que le 17/09 et le 28/09 :
+l'appli démarre avec Windows, donc **sans** `--meetingtrace`. La base a été lue sur une **copie**
+(`.db` + `-wal` + `-shm`), dans le dossier temporaire de session, hors dépôt.
+
+**La demande de l'utilisateur** (2026-09-29) : les suggestions « essaient de matcher avec des
+tâches déjà faites » ; il veut que l'appli **propose des noms de tâche nouveaux** d'après son
+activité, avec l'IA ; qu'elle **propose de corriger** les fautes de frappe et quasi-doublons ;
+qu'elle **détecte d'elle-même un changement de tâche** ; et des appels à l'IA plus fréquents
+(« je n'ai vu aucune requête faite à l'IA »).
+
+**Ce que les données ont montré :**
+
+- **63 % du temps hors réunion part sur des tâches créées le jour même** (65 entrées sur 98) ;
+  136 tâches sur 246 n'ont qu'une entrée. `TaskSuggester` ne sait que reclasser les tâches
+  existantes : il avait tort par construction deux fois sur trois. C'était la cause de la plainte.
+- **L'apprentissage s'intoxiquait**, comme soupçonné : la tâche fourre-tout (« Gen admin, …,
+  e-mails ») avait appris 419 mots — les sujets de mails de tous les clients —, record absolu pour
+  7,5 h pointées, et détenait déjà plus de la moitié du poids de 12 mots qui sont des noms
+  d'autres tâches, dont une créée le matin même.
+- **L'encart du rappel était du bruit** : affiché sur 33 rappels sur 46, suivi d'un changement de
+  tâche dans les 5 min trois fois (ce n'est pas un refus — mais un rappel qui doute trois fois sur
+  quatre n'est plus lu).
+- **IA : 2 appels en 12 jours**, les deux « Tester la connexion » du 17/09. Conforme à la
+  conception v1.6 (un seul usage, sur un clic, au fond de « Gérer les tâches »).
+- **`TaskSimilarity` rejoué sur les 246 vrais noms** (harnais jetable qui compile les sources) :
+  20 paires à 0,85, dont ~7 fausses — même gabarit de nom, client ou sens différent (« … EDI
+  &lt;client A&gt; » / « &lt;client B&gt; », « Outgoing » / « Incoming », « Flow1 » / « Flow2 ») — et
+  des vraies ratées : même sujet avec et sans « Réunion — » (5 paires), suffixes « (annulé) »,
+  faute dans un nom de client. La distance sur le nom entier était le mauvais outil : les fautes
+  tiennent dans un mot.
+
+**v1.4 en conditions réelles — première fois** (elle n'avait tourné que contre un agenda scripté) :
+8 « Réunion suivante » coupées proprement ; 5 chevauchements (4 « je reste », 1 « j'y passe ») ;
+1 question à deux créneaux simultanés, bien pointée ; 24 questions Start (11 acceptées) ;
+1 nuit clôturée à 20:28 au lieu de courir jusqu'au matin (`Absence de`) ; 22 réunions nommées
+pendant qu'elles duraient — les renommages à la main pendant la réunion sont tombés de 19 (cinq
+semaines) à 3, toutes des réunions sans agenda. **La v1.4 est validée.**
+
+⚠️ **À examiner, pas fait** : deux « réunions » démarrées au réveil par `[msedge.exe, Zoom]
+« Zoom Workplace »` ont duré presque toute la journée — le 23/09 de 09:24 à 18:09, enchaînées de
+créneau en créneau (dont 3h30 sur le déjeuner : poste verrouillé sans veille pendant une réunion
+« en cours », donc l'exception de `HandleAbsence` a joué), le 24/09 6h01 (renommée à la main et
+mise en pause par l'utilisateur). Le 28/09, 3h48 pour un créneau de 2 h, gardé tel quel.
+Hypothèse : un onglet Edge garde le micro. Pas de trace ces jours-là : à vérifier avec
+`--meetingtrace` le jour où ça se reproduit. Détail mineur : le 28/09 14:30, une entrée de réunion
+d'1 min (le micro a lâché une minute après une coupure « Réunion suivante »).
+
+### Décisions de l'utilisateur (2026-09-29) — les quatre questions de la passation
+
+1. **Ce qui part à l'IA** : des **mots-clés filtrés** — au plus 20 mots rares des titres de
+   fenêtres, jamais un titre entier, adresses e-mail retirées —, le nom des applications, celui
+   de la tâche en cours et ceux des tâches (hors réunions, les 150 plus récentes). **Affiché à
+   côté de chaque proposition** (`TaskSuggestionAssistant.DescribeSent`).
+2. **Quand** : automatiquement **au changement détecté et à l'ouverture du sélecteur**, au plus
+   un appel toutes les 5 min (plafond de sécurité : 100 par jour), échec silencieux et journalisé,
+   la proposition locale restant affichée.
+3. **Fautes et quasi-doublons** : **proposés, en un clic** — « Tu voulais dire … ? » à la
+   création, bandeau « N noms à vérifier » dans le tableau de bord, liste à cocher.
+4. **Rappel de 30 min** : **gardé, sans l'encart** « tu sembles plutôt sur… », que la fenêtre de
+   changement remplace.
+
+⚠️ Il a été **prévenu** que ces mots-clés peuvent contenir des noms de clients et de collègues,
+et que les conditions de l'API Gemini (version du 23/03/2026, relue ce jour-là) prévoient, pour
+les services **non payants**, que Google utilise les contenus pour améliorer ses produits et que
+des relecteurs humains peuvent les lire — il doit vérifier la politique IA de son entreprise.
+D'où un **interrupteur à part, coupé par défaut** (`AiActivitySuggestions`, « Laisser l'IA
+proposer des noms d'après mes fenêtres »), en plus d'`AiEnabled` qui ne couvre que les noms de
+tâches sur un clic. À ce jour il ne l'a pas coché (à lui de le faire).
+
+### Ce qui a été fait le 2026-09-29 (v1.7)
+
+1. **Garde-fous du poste de travail** (voir §8) : `--selftest` / `--uitest` sont traités
+   **avant** le mutex d'instance unique — son TimeTracker tourne en permanence, les tests
+   n'affichaient que « déjà en cours d'exécution » ; `--db=` gèle le registre de démarrage
+   (`StartupService.Frozen`) — une base neuve effaçait l'entrée de sa vraie installation.
+2. **`TaskSimilarity` refait mot à mot.** Chaque mot de l'un doit se retrouver dans l'autre, tel
+   quel ou à une faute près ; un nombre doit être identique ; un mot de plus toléré seulement à
+   partir de cinq mots ; préfixe de réunion ignoré si le reste fait au moins trois mots ; faute
+   selon la longueur (4-5 lettres : insertion, suppression ou inversion, pas de substitution —
+   « data » / « date » ; 6-9 : une faute ; 10+ : deux). Plus **`CorrectTypos`** (un mot rare à une
+   faute d'un mot employé dans ≥ 3 tâches et deux fois plus) et un **`Vocabulary`** construit une
+   fois pour toute la liste. Pièges trouvés sur les vrais noms et couverts : un pluriel, un mot
+   en « e- » écrit d'un bloc (« ereporting »), un nom propre à deux substitutions de « internal ».
+   La correction garde la casse tapée. Rejoué sur la vraie base : **27 propositions en 74 ms**,
+   aucune fausse repérée hors des fusions « réunion ↔ travail », qui ne sont pas cochées d'office.
+3. **« Noms à vérifier »** (`NameReview`, bandeau du tableau de bord, liste à cocher dans
+   `AiSuggestionsWindow` généralisée). Le nom qui **survit** à une fusion : **sans faute** d'abord
+   (sur les vrais noms la faute portait souvent le plus d'entrées : « Onborading » 6,
+   « Onboarding » 3), puis **au format des réunions automatiques** (« Réunion — sujet », sinon la
+   prochaine réunion recrée le doublon), puis le plus d'entrées ; jamais la tâche en cours ne part.
+   Une proposition cochée que l'utilisateur décoche puis valide est **mémorisée comme refusée**
+   (clé `name_review_dismissed` de `settings`) ; celles décochées d'office ne sont jamais
+   « refusées » sans y avoir touché, et ne comptent pas dans le bandeau. Bouton « Proposer aussi
+   avec l'IA » (le nettoyage v1.6, sur un clic) dans la même fenêtre. « Gérer les tâches »
+   applique désormais la même règle de sens.
+4. **« Tu voulais dire … ? »** dans le sélecteur (et dans la fenêtre de changement) : tâche
+   existante à la faute près, sinon correction mot à mot ; `Tab` ou clic corrige, `Entrée` garde
+   le nom tapé ; contrôle après 300 ms de pause de frappe.
+5. **Détection d'un changement de tâche** (`ActivityShiftDetector`, une évaluation par minute).
+   Une fenêtre « ressemble » à la tâche en cours si son titre a été vu depuis le début de la tâche,
+   ou si elle partage un mot significatif avec ce qui a été vu (≥ 30 s), appris, ou son nom.
+   Déclenche si ≥ 3 min et ≥ 80 % des 5 dernières minutes sont étrangères, **deux évaluations de
+   suite**. Trois subtilités, chacune couverte par `--selftest` : l'**épisode en cours est retiré
+   du profil** de la tâche (sinon une évaluation retardée voyait la nouvelle activité déjà
+   rangée côté tâche) ; un **mot qui nomme une autre tâche** ne décrit pas la tâche en cours ; une
+   autre tâche nommée dans **la moitié au moins** des fenêtres récentes l'emporte sur les mots
+   courants appris — sans ces deux règles, la tâche fourre-tout « ressemblait » à tout. Une seule
+   proposition par changement (mêmes mots-clés jamais reproposés pour la même tâche, 15 min de
+   délai), « je reste » range l'activité côté tâche. Silences (`App.ShiftSilenceReason`) :
+   réglage, pas de tâche active, réunion, moins de 10 min après une bascule ou un réveil, une
+   proposition, le sélecteur ou une fenêtre modale ouverts. **Pas le rappel** : resté ouvert sans
+   réponse, il éteignait la détection — la proposition le ferme et prend sa place, et un rappel
+   n'est pas affiché tant qu'une proposition est à l'écran.
+6. **`ActivityShiftWindow`** — « Tu as changé de tâche ? » : non modale, dans la barre des tâches
+   et Alt-Tab, s'ouvre **sans prendre le focus**, se retire au bout de 20 min (ou quand la tâche
+   change ailleurs, qu'une réunion commence, au réveil si elle est périmée). Tâche existante
+   (suggestion locale, jamais une réunion ni la tâche en cours) et/ou nom nouveau pré-rempli —
+   tiré du titre sur le poste (`ActivityNaming` : marque d'appli, « RE: », extension, adresse
+   e-mail retirés), puis remplacé par celui de l'IA tant que l'utilisateur n'a rien touché —,
+   « Compter depuis HH:MM » coché, « Non, je reste ». La tâche choisie est **relue en base** au
+   moment de basculer (elle a pu être fusionnée pendant que la fenêtre était ouverte).
+7. **`TaskSuggestionAssistant`** (IA) : prompt, `Parse` (tâche existante inconnue écartée, nom
+   nouveau qui est en fait une tâche existante ou son quasi-doublon → cette tâche, jamais la
+   tâche en cours, JSON absent → exception journalisée), `DescribeSent`. Même `IAiProvider` que
+   la v1.6. Dans le sélecteur, la réponse s'affiche sous le champ (« ✨ Nom proposé : … — Tab
+   pour l'utiliser ») avec ce qui est parti.
+8. **Apprentissage refait** (`ActivityLearning`) : différé de 15 min et attribué d'après **les
+   entrées en base** (une bascule antidatée ou corrigée entre-temps est prise en compte), jamais
+   pendant une réunion, le reste appris à la fermeture. Le déjà-appris pollué **n'a pas été
+   effacé** (voir « Ce qui reste »).
+9. **Encart du rappel retiré** (`ReminderPopup`).
+10. **Journal** (jamais de titre ni de mot-clé) : `Changement d'activité probable sur « … »
+    depuis HH:MM (…) — proposé : …`, `Changement accepté : « … » (tâche existante|nouvelle
+    tâche, local|IA|modifié|tapé|corrigé|existante) depuis HH:MM|à partir de maintenant`,
+    `Changement refusé`, `Proposition de changement sans réponse (expirée|fermée|réunion|…)`,
+    `Sélecteur : « … » (rang N, suggérée)` / `Sélecteur : nouvelle tâche « … » (nom corrigé|IA)`,
+    `IA : suggestion d'activité (changement|sélecteur, N mots-clés, M noms) → … en X s`,
+    `Noms à vérifier : N appliqué(s), M écarté(s)`.
+11. **Réglages** : `ActivityShiftDetection` (vrai par défaut), `AiActivitySuggestions` (faux,
+    grisé tant qu'`AiEnabled` est décoché).
+
+Couvert par `--selftest` : `doublons` (vrais, faux, liste), `noms` (fautes, saisie, bandeau,
+refus mémorisés), `changement` (détecté, une seule fois, coup d'œil, même fenêtre, appris, tâche
+fourre-tout, je reste, silence, nom tiré du titre) et `câblage changement` (proposition, heure
+bornée à l'entrée en cours, nouvelle tâche antidatée, existante, tâche fusionnée entre-temps,
+réponse tardive, je reste), `apprentissage` (attribution d'après les entrées, recouvrement),
+`IA_activité` (prompt, lecture, ce qui est parti, mots-clés). `--uitest` : 25 fenêtres dont
+`ActivityShiftWindow` ×3, sélecteur « Tu voulais dire » et « IA », « Noms à vérifier », tableau
+de bord avec bandeau. Une revue de code du diff a trouvé 4 défauts, corrigés avant le paquet
+(tâche fusionnée pendant la proposition, rappel qui éteignait la détection, propositions
+décochées d'office refusées à tort, sens de fusion de « Gérer les tâches »).
+
+**Paquet v1.7** : `%USERPROFILE%\TimeTracker-v1.7\TimeTracker.exe` (72 Mo), `--selftest` et
+`--uitest` verts **sur l'exe publié**. Pas de `LISEZMOI` ni de `.bat` cette fois. L'utilisateur
+l'a lancé le 29/09 vers 14 h 30 (le démarrage avec Windows pointe donc vers la v1.7) et a vu les
+fusions proposées. **Sauvegarde de la base avant test** : `%APPDATA%\TimeTracker\
+sauvegarde-avant-v1.7-20260929.db` (248 tâches, 605 entrées, API de sauvegarde SQLite).
+**Retour arrière** : quitter, relancer la v1.6.2, installée par l'utilisateur dans
+`…\Documents\Programmes\TimeTracker-v1.6.2\` (dans OneDrive). Base partagée, les nouvelles clés
+de `settings` sont ignorées par la v1.6.2.
+
+⚠️ **Ce qui n'a pas été vérifié en conditions réelles** :
+- les **seuils** de la détection de changement (5 min, 3 min, 80 %, deux évaluations, silences
+  de 10 min) : jamais tournés sur de vraies fenêtres — aucun titre n'est conservé, rien à
+  rejouer ;
+- **un vrai appel Gemini avec le nouveau prompt** : la clé de l'utilisateur est en clair dans
+  `settings` et n'a volontairement pas été utilisée. Le format `generateContent` est le même que
+  le test de connexion validé en v1.6 ; la lecture de réponses réalistes est testée ;
+- le ressenti : fréquence des propositions, pertinence des noms tirés des titres.
+
+**À lire dans la prochaine collecte** (lignes du point 10) : combien de propositions par jour,
+réparties entre acceptées / antidatées / refusées / sans réponse — ⚠️ une absence de réponse
+n'est pas un refus ; l'origine des noms acceptés (local, IA, modifié) ; le rang choisi dans le
+sélecteur et la part des tâches nouvelles ; les « Tu voulais dire » repris (`nom corrigé`) ;
+les appels IA s'il a coché la case, et leurs échecs ; ce que « Noms à vérifier » a appliqué.
+Si les propositions sont trop fréquentes ou à tort, **mesurer avant de toucher** : c'est
+`MinMismatch`, `MismatchRatio`, `HoldEvaluations` et `ShiftQuietAfterSwitch` qu'on règle.
 
 ### 3e collecte (2026-08-10 → 09-15, dépouillée le 2026-09-17) — cinq semaines avec l'agenda
 
@@ -510,26 +696,36 @@ des fenêtres en base, assistant IA multi-fournisseur (coupé par défaut). Voir
 « Ce qui a été fait le 2026-09-17 » plus haut. **v1.6.2** : objectif d'heures au choix par jour
 ou par semaine (retour immédiat de l'utilisateur), Gemini vérifié par lui avec sa clé.
 
-Ensuite, par ordre de priorité :
+**v1.7 packagée le 2026-09-29** (`%USERPROFILE%\TimeTracker-v1.7\`), **en test chez
+l'utilisateur** : voir « 4e collecte » plus haut.
 
-0. **Suggestions proactives** (demande explicite du 2026-09-17, fin de session) : quand
-   l'activité des fenêtres désigne nettement une autre tâche que celle en cours, TimeTracker
-   doit **proposer le changement de lui-même**, sans attendre le sélecteur ni le rappel. Base
-   existante : `ActivityProbe`, `TaskSuggester`, `App.ActivityHint`. Conception à valider avec
-   lui : vérification périodique avec hystérésis (la contradiction doit tenir plusieurs minutes),
-   une seule proposition par paire tâche en cours → suggérée, fenêtre **non modale** en bas à
-   droite avec « Basculer / Basculer depuis il y a N min / Non, je reste », jamais de bascule
-   sans clic, silence en réunion, en pause et juste après un changement, réglage dédié, chaque
-   proposition et sa réponse journalisées pour juger le seuil à la collecte suivante.
-1. **Relire la prochaine collecte** sur les trois nouveautés (lignes « Réunion suivante »,
-   « question (Switch/Name) », « Absence de … ») : elles n'ont tourné que contre un agenda
-   scripté. En particulier vérifier que la coupure automatique ne produit pas trop de petites
-   entrées quand une réunion déborde sur le créneau suivant.
-2. **Réinstaller le SDK .NET 8** (`dotnet.exe` manquant, voir §5) — sinon le remplaçant fait
-   l'affaire.
-3. Étape 8 (installeur) — voir §7. C'est ce qui reste pour une « version finale » : un
+Ensuite, par ordre de priorité (mis à jour le 2026-09-29) :
+
+0. **Recueillir ses impressions sur la v1.7** — il a dit qu'il revenait après l'avoir testée —
+   puis **relire son `log.txt`** sur les lignes listées dans « À lire dans la prochaine
+   collecte ». Ne rien régler à l'aveugle : les seuils de la détection n'ont jamais vu de vraies
+   fenêtres. S'il faut des données plus fines (quelles fenêtres ont déclenché), lui **proposer**
+   une collecte d'activité opt-in, locale, sur le modèle de `--meetingtrace` — pas la décider :
+   aujourd'hui aucun titre n'est conservé, par principe.
+1. **L'appris pollué n'a pas été effacé.** La tâche fourre-tout garde ses 419 mots ; les
+   nouvelles règles de la détection les neutralisent en partie, pas `TaskSuggester`. Lui
+   proposer « Oublier ce qui a été appris » (Paramètres) ou un oubli ciblé de cette seule tâche
+   (à écrire), et lui laisser le choix.
+2. **Les « réunions toute la journée »** des 23 et 24/09 (voir plus haut) : attendre que ça se
+   reproduise avec `--meetingtrace` pour savoir qui tient le micro.
+3. **S'il coche l'IA d'après les fenêtres** : vérifier dans le journal que les appels passent
+   (`IA : suggestion d'activité … →`), leur durée, et que le nombre par jour reste raisonnable.
+   Les fournisseurs OpenAI-compatible et Anthropic restent écrits de mémoire, non testés.
+4. Petits points connus, non faits : le compteur du bandeau n'est pas recalculé après « Gérer
+   les tâches » (jusqu'à 1 min de décalage) ; un mutex distinct pour `--db=` permettrait
+   d'explorer l'UI à côté de sa vraie instance (aujourd'hui : « déjà en cours d'exécution ») ;
+   pondérer l'appris par la récence (§7).
+5. Étape 8 (installeur) — voir §7. C'est ce qui reste pour une « version finale » : un
    raccourci menu Démarrer, ajout/suppression de programmes, et la question SmartScreen.
-4. Cosmétique : la durée annoncée dans la bulle de fin de réunion après une pause.
+6. Cosmétique : la durée annoncée dans la bulle de fin de réunion après une pause.
+
+La relecture de la v1.4 en réel (ancien point 1) est **faite** : validée, voir « 4e collecte ».
+Le SDK de l'ancien poste (ancien point 2) ne concerne plus : le nouveau poste a son SDK (§5).
 
 ### Malentendu à ne pas reproduire
 
@@ -728,7 +924,8 @@ seuls retours arrière possibles :
 
 | Dossier | Rôle |
 |---------|------|
-| `TimeTracker-v1.6.2\` | **à jour** (2026-09-17) : objectif d'heures par jour ou par semaine, au choix |
+| `TimeTracker-v1.7\` | **en test** (2026-09-29, poste de travail, `%USERPROFILE%`) : changement de tâche proposé, « Tu voulais dire », noms à vérifier, IA d'après les fenêtres (coupée par défaut) |
+| `TimeTracker-v1.6.2\` | objectif d'heures par jour ou par semaine, au choix — **le retour arrière de la v1.7**. Sur le poste de travail, l'utilisateur l'a installée dans `Documents\Programmes\` (OneDrive), pas dans `%USERPROFILE%` |
 | `TimeTracker-v1.6\` | apprentissage des fenêtres en base, assistant IA multi-fournisseur (coupé par défaut) — objectif encore « par semaine » |
 | `TimeTracker-v1.5\` | objectif hebdo, export de période, raccourci pause, suggestions par l'activité, doublons probables — retour arrière sans table `task_hints` ni IA |
 | `TimeTracker-v1.4\` | réunions enchaînées coupées, choix entre créneaux, clôture après absence, nommage pendant la réunion — retour arrière si les suggestions dérangent |
@@ -779,6 +976,12 @@ TimeTracker/
 │   │    Services/ActivityProbe.cs — fenêtre au premier plan, en mémoire seulement ;
 │   │    Services/TaskSuggester.cs — suggestion par les mots ; Services/TaskSimilarity.cs —
 │   │    doublons de noms ; UI/ExportRangeWindow — export d'une période libre)
+│   │   (ajoutés le 2026-09-29, v1.7 : Services/ActivityShiftDetector.cs — changement de
+│   │    tâche probable ; Services/ActivityNaming.cs — nom tiré d'un titre ;
+│   │    Services/ActivityLearning.cs — apprentissage différé d'après la base ;
+│   │    Services/NameReview.cs — noms à vérifier, « Tu voulais dire » ;
+│   │    Services/Ai/TaskSuggestionAssistant.cs — l'IA propose un nom d'après des mots-clés ;
+│   │    UI/ActivityShiftWindow — « Tu as changé de tâche ? »)
 │   ├── Models/
 │   │   ├── TaskItem.cs        # id, name, last_used, is_favorite
 │   │   ├── TaskUsage.cs       # tâche + nb d'entrées / total / dernier usage (gestion)
@@ -844,6 +1047,12 @@ puis persiste, et `App` réapplique à chaud (intervalle de rappel, raccourcis, 
 & "C:\Program Files\dotnet\dotnet.exe" run --project TimeTracker.csproj
 ```
 
+**Poste de travail (depuis le 2026-09-27)** : `dotnet` est dans le PATH, mais c'est un **SDK
+9.0.305** (pas de SDK 8) ; il compile la cible `net8.0-windows` sans avertissement, les runtimes
+Windows Desktop 8.0.20 / 8.0.31 sont présents. Restauration NuGet OK. Build, tests et
+`publish` de la v1.7 faits ainsi. Le remplaçant `dotnet-shim` ci-dessous ne concerne que
+l'ancien poste de développement.
+
 ⚠️ **Le 2026-09-17, `C:\Program Files\dotnet\dotnet.exe` n'existait plus** (le multiplexeur
 seul ; `sdk\8.0.424`, `host\fxr\8.0.30`, `shared\*\8.0.30` et `packs` intacts). Sans télécharger
 quoi que ce soit, un remplaçant a été compilé avec le `csc.exe` de .NET Framework
@@ -905,16 +1114,59 @@ capture WASAPI (le vrai problème venait de WinMM), normalisation audio, langue 
   un certificat commercial coûtant quelques centaines d'euros par an.
 - Idées non demandées : notes sur une entrée (colonne `notes` en base, exportée, remplie par
   la détection de réunion, mais aucune UI ne la saisit à la main).
-- **Suggestions par l'activité** : l'apprentissage est fait (v1.6, §0). Suite possible : pondérer
+- **Suggestions par l'activité** : refaites en v1.7 (changement de tâche proposé, noms nouveaux,
+  noms à vérifier, apprentissage différé — §0, « 4e collecte »). Suite possible : pondérer
   par la récence (un mot appris il y a six mois pèse comme un mot d'hier), et un écran qui montre
   ce qui a été appris par tâche — aujourd'hui seul « Oublier » existe.
-- **Assistant IA** : branché en v1.6 (§0), un seul usage (nettoyage des tâches). Idées à la
-  demande : codes projet de la timesheet interne, résumé de semaine, nommage d'une réunion Zoom
-  sans agenda. ⚠️ Toujours coupé par défaut, toujours sur un clic, toujours les seuls noms.
+- **Assistant IA** : branché en v1.6 (nettoyage des tâches, sur un clic), étendu en v1.7 aux
+  **noms proposés d'après des mots-clés de fenêtres**, automatiquement mais derrière un second
+  interrupteur coupé par défaut (§0, décisions du 2026-09-29). Idées à la demande : codes projet
+  de la timesheet interne, résumé de semaine, nommage d'une réunion Zoom sans agenda.
+  ⚠️ Toujours coupé par défaut ; jamais un titre entier ; ce qui part toujours affiché.
 
 ---
 
 ## 8. Pièges & leçons (à connaître pour ne pas les reprendre)
+
+**Propres au poste de travail** (celui de l'utilisateur, depuis le 2026-09-27) :
+
+- ⚠️ **La vraie base est là** : `%APPDATA%\TimeTracker\timetracker.db`, ouverte en WAL par son
+  TimeTracker qui tourne **en permanence**. Pour la lire : copier `.db`, `-wal` et `-shm`
+  ensemble, ou l'API de sauvegarde SQLite depuis une connexion `mode=ro` (Python est présent) ;
+  ne travailler que sur la copie, hors dépôt. Jamais de test dessus.
+- Depuis la v1.7, **`--selftest` et `--uitest` passent avant le mutex** : ils tournent pendant que
+  son TimeTracker tourne. Mais ils écrivent dans **son** `log.txt` — les lignes `SELFTEST` /
+  `UITEST` s'y mêlent à sa journée, et le dépouillement doit les ignorer.
+- **`--db=` ne touche plus au registre** (`StartupService.Frozen`). Il reste bloqué par le mutex :
+  pour explorer l'UI sur une base de test, il faut qu'il quitte son TimeTracker (ou écrire un
+  mutex distinct pour `--db=`, non fait).
+- **Lancer un exe relance le démarrage avec Windows vers cet exe** (si le réglage est coché) :
+  c'est ce qui fait qu'un paquet devient « l'installé ». Relancer l'ancien pour revenir.
+- **Sa clé Gemini est en clair dans `settings`** : ne jamais l'afficher, la copier, la journaliser
+  ni s'en servir pour un test — c'est à lui de tester avec.
+- **Aucun titre de fenêtre n'est conservé** (ni base, ni journal) : impossible de rejouer la
+  détection de changement sur une semaine passée. Seul `task_hints` (mots agrégés par tâche)
+  existe. Pour régler les seuils sur du réel, il faudra une collecte opt-in, à lui proposer.
+- ⚠️ **Vérifier du C# en le réimplémentant ne prouve rien** (rappel) : pour rejouer ses vrais
+  noms à travers `TaskSimilarity` / `NameReview`, un harnais jetable hors dépôt qui
+  `<Compile Include>` les sources a été utilisé (exclure `Core/Models/Hotkey.cs`, qui tire WPF ;
+  `DatabaseService` demande le paquet `Microsoft.Data.Sqlite`).
+
+**Leçons de la v1.7** :
+
+- ⚠️ **Un suggéreur qui reclasse l'existant ne peut pas suivre quelqu'un qui crée ses tâches à la
+  volée** — 63 % du temps sur des tâches du jour même. Mesurer la part de tâches nouvelles avant
+  de régler un score.
+- ⚠️ **Apprendre « ce qui tourne à l'instant » pollue la tâche fourre-tout.** Attribuer d'après la
+  base, après coup, et ne jamais laisser un mot qui **nomme une autre tâche** décrire celle-ci.
+- **Une comparaison de noms se fait mot à mot** quand les noms suivent des gabarits : sur soixante
+  caractères, deux clients différents sont « à 0,88 » l'un de l'autre.
+- **Dans une fusion, c'est le nom qui survit qui compte, pas le nombre d'entrées** : les entrées
+  suivent de toute façon, et la faute portait souvent le plus d'entrées.
+- **Une fenêtre non modale laisse le monde bouger derrière elle** : relire en base ce qu'elle
+  propose au moment où l'utilisateur répond (la tâche proposée a pu être fusionnée entre-temps).
+- **Un rappel non modal peut rester ouvert des heures** : ne pas en faire une condition de silence
+  pour autre chose.
 
 - ⚠️ **Un `ShowDialog()` sur une fenêtre `ShowInTaskbar="False"` + `WindowStyle="ToolWindow"`
   est un blocage définitif en puissance.** Ni barre des tâches, ni Alt-Tab : si elle ne s'affiche

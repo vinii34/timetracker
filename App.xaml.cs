@@ -47,6 +47,7 @@ public partial class App : Application
     private bool _selectorOpen;
     private bool _modalOpen;   // correction à chaud / paramètres / gestion des tâches
     private bool _reminderOpen; // un rappel affiché ne doit pas se superposer au suivant
+    private Window? _reminderPopup;   // le rappel « en cours » affiché, que la proposition de changement remplace
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -78,33 +79,22 @@ public partial class App : Application
             return;
         }
 
-        // Instance unique
-        _singleInstanceMutex = new Mutex(initiallyOwned: true, "TimeTracker_SingleInstance_2F8B", out bool createdNew);
-        if (!createdNew)
-        {
-            MessageBox.Show("TimeTracker est déjà en cours d'exécution.", "TimeTracker",
-                MessageBoxButton.OK, MessageBoxImage.Information);
-            Shutdown();
-            return;
-        }
-
         // Le self-test fabrique des entrées bidon : il travaille sur une base jetable
         // pour ne jamais polluer le relevé de temps réel de l'utilisateur.
         bool selfTest = e.Args.Contains("--selftest");
         // --uitest[=<dossier>] : le dossier reçoit une capture PNG de chaque fenêtre.
         var uiTestArg = e.Args.FirstOrDefault(a => a.StartsWith("--uitest", StringComparison.Ordinal));
         bool uiTest = uiTestArg != null;
-        var throwawayDb = Path.Combine(Path.GetTempPath(), $"timetracker_selftest_{Guid.NewGuid():N}.db");
 
-        // --db=<chemin> : base alternative (tests manuels sans toucher au relevé réel).
-        var overrideDb = e.Args.FirstOrDefault(a => a.StartsWith("--db=", StringComparison.Ordinal))?[5..];
-
-        _db = new DatabaseService(selfTest || uiTest ? throwawayDb : overrideDb);
-        _db.Initialize();
-        _settings = _db.LoadSettings();
-
+        // Tests traités AVANT l'instance unique : ils n'ouvrent ni barre système, ni raccourcis,
+        // ni registre, et sur le poste de l'utilisateur TimeTracker tourne en permanence — sous
+        // le mutex, ils se contentaient d'afficher « déjà en cours d'exécution ».
         if (selfTest || uiTest)
         {
+            var throwawayDb = Path.Combine(Path.GetTempPath(), $"timetracker_selftest_{Guid.NewGuid():N}.db");
+            _db = new DatabaseService(throwawayDb);
+            _db.Initialize();
+            _settings = _db.LoadSettings();
             if (selfTest) RunSelfTest();
             if (uiTest)
             {
@@ -115,6 +105,25 @@ public partial class App : Application
             Shutdown();
             return;
         }
+
+        // Instance unique
+        _singleInstanceMutex = new Mutex(initiallyOwned: true, "TimeTracker_SingleInstance_2F8B", out bool createdNew);
+        if (!createdNew)
+        {
+            MessageBox.Show("TimeTracker est déjà en cours d'exécution.", "TimeTracker",
+                MessageBoxButton.OK, MessageBoxImage.Information);
+            Shutdown();
+            return;
+        }
+
+        // --db=<chemin> : base alternative (tests manuels sans toucher au relevé réel). Le
+        // registre de démarrage reste celui de l'installation réelle.
+        var overrideDb = e.Args.FirstOrDefault(a => a.StartsWith("--db=", StringComparison.Ordinal))?[5..];
+        if (overrideDb != null) StartupService.Frozen = true;
+
+        _db = new DatabaseService(overrideDb);
+        _db.Initialize();
+        _settings = _db.LoadSettings();
 
         // Aligne le registre de démarrage sur le réglage enregistré.
         try { StartupService.SetEnabled(_settings.StartWithWindows); } catch { /* non bloquant */ }
@@ -270,12 +279,24 @@ public partial class App : Application
                                    .Take(15).ToList();
             }
 
-            var result = TaskSelectorPopup.Pick(tasks, prefill, offerBackdate, reasons);
+            var allTasks = _db.GetAllTasks();
+            var vocabulary = TaskSimilarity.Vocabulary.Of(allTasks.Select(t => t.Name));
+            var result = TaskSelectorPopup.Pick(tasks, prefill, offerBackdate, reasons,
+                checkName: typed => NameReview.CheckNewName(typed, allTasks, _settings.MeetingTaskName, vocabulary),
+                opened: SelectorAiRequest() is { } ai ? popup => _ = AskAiForSelector(ai.Provider, ai.Request, popup) : null);
             if (result is null) return;
 
+            bool existed = result.ExistingTask != null || _db.FindTaskByName(result.NewTaskName!) != null;
             TaskItem task = result.ExistingTask
                             ?? _db.GetOrCreateTask(result.NewTaskName!);
             _timer.StartTask(task, BackdatedStart(result.BackdateMinutes));
+
+            // Pour juger les suggestions à la collecte suivante : rang, 💡, origine du nom.
+            // Jamais de titre de fenêtre ici — seulement des noms de tâches, comme partout.
+            Logger.Info(result.ExistingTask != null
+                ? $"Sélecteur : « {task.Name} » (rang {result.Rank}{(result.WasSuggested ? ", suggérée" : "")})."
+                : $"Sélecteur : {(existed ? "tâche existante tapée" : "nouvelle tâche")} « {task.Name} »" +
+                  (result.NameOrigin == "tapé" ? "" : $" (nom {result.NameOrigin})") + ".");
         }
         catch (Exception ex)
         {
@@ -325,7 +346,7 @@ public partial class App : Application
     // ------------------------------------------------ Suggestions par l'activité
 
     private ActivityProbe? _activity;
-    private DispatcherTimer? _learnTimer;
+    private DispatcherTimer? _activityTimer;
     private DateTime _learnedUntil = DateTime.Now;
 
     /// <summary>Aligne le relevé d'activité sur le réglage (démarrage et après les Paramètres).</summary>
@@ -334,52 +355,368 @@ public partial class App : Application
         if (!_settings.ActivitySuggestions)
         {
             _activity?.Stop();
-            _learnTimer?.Stop();
+            _activityTimer?.Stop();
+            _shiftWindow?.Expire("suggestions coupées");
             return;
         }
         _activity ??= new ActivityProbe();
         if (!_activity.IsRunning) { _activity.Start(); _learnedUntil = DateTime.Now; }
 
-        // Apprentissage : une fois par minute, les mots des titres vus depuis le dernier passage
-        // sont comptés pour la tâche en cours. Débrayable séparément des suggestions.
-        _learnTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
-        _learnTimer.Tick -= LearnFromActivity;
-        _learnTimer.Tick += LearnFromActivity;
-        if (_settings.ActivityLearning) { if (!_learnTimer.IsEnabled) _learnTimer.Start(); }
-        else _learnTimer.Stop();
+        // Une fois par minute : apprentissage (différé) et détection d'un changement de tâche.
+        _activityTimer ??= new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+        _activityTimer.Tick -= OnActivityMinute;
+        _activityTimer.Tick += OnActivityMinute;
+        if (!_activityTimer.IsEnabled) _activityTimer.Start();
+        if (!_settings.ActivityShiftDetection) _shiftWindow?.Expire("réglage coupé");
+    }
+
+    private void OnActivityMinute(object? sender, EventArgs e)
+    {
+        LearnFromActivity(flush: false);
+        CheckActivityShift();
     }
 
     /// <summary>
-    /// Compte, pour la tâche qui tourne, les mots des titres de fenêtres vus depuis la dernière
-    /// minute. Ni pause, ni suivi arrêté ; ni les fenêtres de TimeTracker lui-même (le sélecteur
-    /// et le tableau de bord accompagnent toutes les tâches). Les secondes s'accumulent en base
+    /// Compte les mots des titres de fenêtres pour les tâches que la base désigne, avec
+    /// <see cref="ActivityLearning.Delay"/> de recul — une bascule corrigée ou antidatée entre-temps
+    /// est donc prise en compte (voir <see cref="ActivityLearning"/>). <paramref name="flush"/>
+    /// apprend tout ce qui reste, à la fermeture. Les secondes s'accumulent en base
     /// (<c>task_hints</c>) — c'est ce que l'utilisateur a accepté le 2026-09-17.
     /// </summary>
-    private void LearnFromActivity(object? sender, EventArgs e)
+    private void LearnFromActivity(bool flush)
     {
         try
         {
             if (_activity is null || !_activity.IsRunning || !_settings.ActivityLearning) return;
-            var now = DateTime.Now;
+            var until = flush ? DateTime.Now : DateTime.Now - ActivityLearning.Delay;
             var since = _learnedUntil;
-            _learnedUntil = now;
-            if (!_timer.HasActiveTask || _timer.CurrentTask is null) return;
-            if (since < _timer.CurrentStart) since = _timer.CurrentStart;
+            if (until <= since) return;
+            _learnedUntil = until;
 
-            var seconds = new Dictionary<string, int>();
-            foreach (var sample in _activity.Recent(now - since))
-            {
-                if (sample.At < since) continue;
-                if (sample.Process.Equals("TimeTracker", StringComparison.OrdinalIgnoreCase)) continue;
-                foreach (var word in TaskSuggester.Words(sample.Title))
-                    seconds[word] = seconds.GetValueOrDefault(word) + 5;
-            }
-            if (seconds.Count > 0) _db.AddTaskHints(_timer.CurrentTask.Id, seconds);
+            var samples = _activity.Recent(ActivityProbe.Retention).Where(s => s.At >= since && s.At < until).ToList();
+            if (samples.Count == 0) return;
+            var entries = _db.GetEntriesOverlapping(since, until);
+            foreach (var (taskId, words) in ActivityLearning.Attribute(samples, entries))
+                _db.AddTaskHints(taskId, words);
         }
         catch (Exception ex)
         {
             Logger.Error("LearnFromActivity", ex);
         }
+    }
+
+    // ------------------------------------------------ Changement de tâche probable
+
+    private readonly ActivityShiftDetector _shiftDetector = new();
+    private ActivityShiftWindow? _shiftWindow;
+
+    /// <summary>Dernier réveil de veille ou déverrouillage : rien n'est proposé juste après.</summary>
+    private DateTime _lastWake = DateTime.MinValue;
+
+    private static readonly TimeSpan ShiftQuietAfterSwitch = TimeSpan.FromMinutes(10);
+
+    /// <summary>Pourquoi il ne faut rien proposer maintenant, ou null.</summary>
+    private string? ShiftSilenceReason(DateTime now)
+    {
+        if (!_settings.ActivityShiftDetection) return "réglage";
+        if (_timer is null || !_timer.HasActiveTask || _timer.CurrentTask is null) return "pas de tâche active";
+        if (_meetings?.InMeeting == true || (_meetingEntryId.HasValue && _meetingEntryId == _timer.CurrentEntryId))
+            return "réunion";
+        if (now - _timer.CurrentStart < ShiftQuietAfterSwitch) return "bascule récente";
+        if (now - _lastWake < ShiftQuietAfterSwitch) return "réveil récent";
+        // Pas le rappel : non modal, il peut rester ouvert des heures sans réponse et aurait
+        // éteint la détection d'autant. La proposition le remplace (ShowShiftProposal).
+        if (_shiftWindow != null || _selectorOpen || _modalOpen) return "fenêtre ouverte";
+        return null;
+    }
+
+    /// <summary>Une évaluation par minute ; la proposition s'ouvre si le détecteur conclut.</summary>
+    private void CheckActivityShift()
+    {
+        try
+        {
+            if (_activity is null || !_activity.IsRunning) return;
+            var now = DateTime.Now;
+            if (ShiftSilenceReason(now) != null) { _shiftDetector.Silence(); return; }
+
+            var task = _timer.CurrentTask!;
+            var hints = _db.GetTaskHints();
+            var common = TaskSuggester.CommonLearnedWords(hints);
+            var learned = hints.TryGetValue(task.Id, out var own)
+                ? own.Where(w => w.Value >= 60).Select(w => w.Key).ToHashSet(StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+            var others = TaskSuggester.RareNameWords(_db.GetAllTasks(), task.Id);
+            var context = new ActivityShiftDetector.Context(task.Id, task.Name, _timer.CurrentStart, learned,
+                                                            common.Contains, others.Contains);
+
+            var shift = _shiftDetector.Evaluate(now, _activity.Recent(ActivityProbe.Retention), context);
+            if (shift != null) ShowShiftProposal(BuildShiftProposal(task, shift, hints));
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("CheckActivityShift", ex);
+        }
+    }
+
+    /// <summary>Ce qu'on propose, décidé sans rien afficher (vérifiable par <c>--selftest</c>).</summary>
+    private sealed record ShiftProposal(TaskItem Current, ActivityShiftDetector.Shift Shift, DateTime Since,
+                                        TaskSuggester.Suggestion? Local, string? LocalName,
+                                        (IAiProvider Provider, TaskSuggestionAssistant.Request Request)? Ai,
+                                        IReadOnlyList<TaskItem> Tasks);
+
+    /// <summary>
+    /// Ce que le poste sait proposer seul — une tâche existante suggérée par les fenêtres (jamais
+    /// une réunion ni la tâche en cours), un nom tiré du titre — et de quoi demander mieux à l'IA
+    /// si l'utilisateur l'a autorisé. L'heure proposée ne remonte jamais avant l'entrée en cours.
+    /// </summary>
+    private ShiftProposal BuildShiftProposal(TaskItem current, ActivityShiftDetector.Shift shift,
+                                             Dictionary<long, Dictionary<string, int>> hints)
+    {
+        _shiftDetector.Proposed(shift, DateTime.Now);
+        var tasks = _db.GetAllTasks();
+        var local = TaskSuggester.Suggest(tasks, shift.Samples, hints, max: 3)
+                                 .FirstOrDefault(s => s.Task.Id != current.Id
+                                                      && !NameReview.IsMeeting(s.Task.Name, _settings.MeetingTaskName));
+        var localName = ActivityNaming.FromTitle(shift.DominantTitle, shift.Processes.FirstOrDefault() ?? "");
+        var ai = ActivityAiRequest(current.Name, shift.Keywords, shift.Processes, fromSelector: false);
+        return new ShiftProposal(current, shift, ClampToCurrentEntry(shift.Since), local, localName, ai, tasks);
+    }
+
+    /// <summary>
+    /// Ouvre « Tu as changé de tâche ? », puis, si l'IA est de la partie, met la fenêtre à jour
+    /// quand elle répond.
+    /// </summary>
+    private void ShowShiftProposal(ShiftProposal p)
+    {
+        // Le journal ne dit ni titre ni mot-clé : seulement la tâche en cours et la nature de la proposition.
+        Logger.Info($"Changement d'activité probable sur « {p.Current.Name} » depuis {p.Since:HH:mm} " +
+                    $"({Format(p.Shift.Evidence)}) — proposé : " +
+                    (p.Local != null ? $"tâche existante « {p.Local.Task.Name} »" : "pas de tâche existante") +
+                    (p.LocalName != null ? ", nom tiré du titre" : "") +
+                    (p.Ai != null ? ", IA interrogée" : "") + ".");
+
+        // Un rappel resté ouvert pose une question moins précise au même endroit de l'écran :
+        // il est fermé (compté « je continue »), la proposition prend sa place.
+        _reminderPopup?.Close();
+
+        var vocabulary = TaskSimilarity.Vocabulary.Of(p.Tasks.Select(t => t.Name));
+        var window = new ActivityShiftWindow(p.Current.Name, p.Since, p.Shift.Evidence, p.Shift.DominantTitle,
+            p.Shift.DominantTime, p.Local?.Task, p.Local?.Reason, p.LocalName,
+            typed => NameReview.CheckNewName(typed, p.Tasks, _settings.MeetingTaskName, vocabulary),
+            _settings.ReminderSound);
+        window.Answered += answer => OnShiftAnswered(p.Current, p.Shift, p.Since, answer);
+        _shiftWindow = window;
+        window.Show();
+
+        if (p.Ai is { } ai) _ = AskAiForShift(ai.Provider, ai.Request, window);
+    }
+
+    private async Task AskAiForShift(IAiProvider provider, TaskSuggestionAssistant.Request request, ActivityShiftWindow window)
+    {
+        window.ShowAiPending(provider.Name, TaskSuggestionAssistant.DescribeSent(request, provider.Name));
+        var answer = await RunActivityAi(provider, request);
+        if (_shiftWindow != window) return;   // déjà répondue ou retirée
+        if (answer is null) { window.ShowAiFailed(); return; }
+        var existing = answer.Existing is null ? null : _db.FindTaskByName(answer.Existing);
+        window.ShowAiAnswer(existing, existing is null ? answer.NewName : null, answer.Why);
+    }
+
+    private void OnShiftAnswered(TaskItem current, ActivityShiftDetector.Shift shift, DateTime since, ShiftAnswer answer)
+    {
+        _shiftWindow = null;
+        try
+        {
+            // La tâche a pu changer entre l'affichage et la réponse (réunion, sélecteur) :
+            // basculer depuis 10:42 rognerait alors une entrée qui n'est plus la bonne.
+            bool stillCurrent = _timer.CurrentTask?.Id == current.Id && _timer.HasActiveTask;
+            switch (answer.Kind)
+            {
+                case ShiftAnswerKind.Existing or ShiftAnswerKind.New when stillCurrent:
+                {
+                    // Relue en base : la fenêtre ne bloque rien, la tâche proposée a pu être
+                    // fusionnée entre-temps (« Noms à vérifier »). La démarrer quand même ferait
+                    // échouer l'entrée sur la clé étrangère après avoir clôturé la précédente.
+                    var task = answer.Task is { } chosen ? _db.GetTask(chosen.Id) : _db.GetOrCreateTask(answer.NewName!);
+                    if (task is null)
+                    {
+                        Logger.Info($"Changement accepté vers « {answer.Task!.Name} », qui n'existe plus (fusionnée entre-temps) : rien n'est fait.");
+                        break;
+                    }
+                    var start = answer.Backdate ? ClampToCurrentEntry(since) : (DateTime?)null;
+                    _timer.StartTask(task, start);
+                    Logger.Info($"Changement accepté : « {task.Name} » " +
+                                (answer.Kind == ShiftAnswerKind.Existing ? "(tâche existante" : "(nouvelle tâche") +
+                                $", {answer.Origin}) {(start is DateTime s ? $"depuis {s:HH:mm}" : "à partir de maintenant")}.");
+                    RefreshTrayState();
+                    break;
+                }
+                case ShiftAnswerKind.Existing or ShiftAnswerKind.New:
+                    Logger.Info("Changement accepté trop tard : la tâche en cours a changé entre-temps, rien n'est fait.");
+                    break;
+                case ShiftAnswerKind.Stay:
+                    _shiftDetector.Stayed(shift);
+                    Logger.Info($"Changement refusé : il reste sur « {current.Name} ».");
+                    break;
+                default:
+                    Logger.Info($"Proposition de changement sans réponse ({answer.Origin}).");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("OnShiftAnswered", ex);
+        }
+    }
+
+    // ------------------------------------------------ IA d'après l'activité
+
+    private DateTime _lastActivityAiCall = DateTime.MinValue;
+    private DateTime _activityAiDay = DateTime.MinValue;
+    private int _activityAiCalls;
+
+    /// <summary>Au plus un appel automatique toutes les 5 min, et un plafond de sécurité par jour.</summary>
+    private static readonly TimeSpan ActivityAiInterval = TimeSpan.FromMinutes(5);
+    private const int ActivityAiDailyCap = 100;
+
+    /// <summary>
+    /// De quoi interroger l'IA d'après l'activité, ou null si ce n'est pas permis maintenant :
+    /// interrupteurs, cadence, trop peu de mots-clés, fournisseur mal configuré.
+    /// </summary>
+    private (IAiProvider Provider, TaskSuggestionAssistant.Request Request)? ActivityAiRequest(
+        string? currentTask, IReadOnlyList<string> keywords, IReadOnlyList<string> processes, bool fromSelector)
+    {
+        if (!_settings.AiEnabled || !_settings.AiActivitySuggestions) return null;
+        var now = DateTime.Now;
+        if (now - _lastActivityAiCall < ActivityAiInterval) return null;
+        if (_activityAiDay != now.Date) { _activityAiDay = now.Date; _activityAiCalls = 0; }
+        if (_activityAiCalls >= ActivityAiDailyCap) return null;
+        if (keywords.Count < 3) return null;
+
+        IAiProvider provider;
+        try { provider = AiProviderFactory.Create(_settings); }
+        catch (Exception ex) { Logger.Info($"IA : suggestion d'activité impossible — {ex.Message}"); return null; }
+
+        var names = _db.GetAllTasks()
+                       .Where(t => !NameReview.IsMeeting(t.Name, _settings.MeetingTaskName))
+                       .OrderByDescending(t => t.LastUsed ?? DateTime.MinValue)
+                       .Select(t => t.Name)
+                       .Take(TaskSuggestionAssistant.MaxTaskNames)
+                       .ToList();
+        return (provider, new TaskSuggestionAssistant.Request(currentTask, keywords, processes, names, fromSelector));
+    }
+
+    /// <summary>La même chose à l'ouverture du sélecteur, d'après les 10 dernières minutes.</summary>
+    private (IAiProvider Provider, TaskSuggestionAssistant.Request Request)? SelectorAiRequest()
+    {
+        if (_activity is null || !_activity.IsRunning || !_settings.AiEnabled || !_settings.AiActivitySuggestions) return null;
+        var samples = _activity.Recent(TimeSpan.FromMinutes(10));
+        var common = TaskSuggester.CommonLearnedWords(_db.GetTaskHints());
+        var keywords = ActivityShiftDetector.Keywords(samples, common.Contains);
+        var processes = samples.Where(s => !s.Process.Equals("TimeTracker", StringComparison.OrdinalIgnoreCase) && s.Process.Length > 0)
+                               .GroupBy(s => s.Process, StringComparer.OrdinalIgnoreCase)
+                               .OrderByDescending(g => g.Count()).Select(g => g.Key).Take(3).ToList();
+        return ActivityAiRequest(_timer?.CurrentTask?.Name, keywords, processes, fromSelector: true);
+    }
+
+    private async Task AskAiForSelector(IAiProvider provider, TaskSuggestionAssistant.Request request, TaskSelectorPopup popup)
+    {
+        bool closed = false;
+        popup.Closed += (_, _) => closed = true;
+        var sent = TaskSuggestionAssistant.DescribeSent(request, provider.Name);
+        var answer = await RunActivityAi(provider, request);
+        if (closed) return;
+        if (answer?.Existing is { } existing) popup.ShowAiSuggestion(existing, true, answer.Why, sent);
+        else if (answer?.NewName is { } name) popup.ShowAiSuggestion(name, false, answer.Why, sent);
+        else popup.ShowAiNothing(answer is null ? "✨ L'IA n'a pas répondu." : "✨ L'IA ne voit pas de tâche évidente.", sent);
+    }
+
+    /// <summary>
+    /// Un appel, journalisé en comptes seulement (jamais les mots-clés, jamais la réponse) ; null
+    /// en cas d'échec, qui reste silencieux pour l'utilisateur : la proposition locale demeure.
+    /// </summary>
+    private async Task<TaskSuggestionAssistant.Answer?> RunActivityAi(IAiProvider provider, TaskSuggestionAssistant.Request request)
+    {
+        _lastActivityAiCall = DateTime.Now;
+        _activityAiCalls++;
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+            var answer = await TaskSuggestionAssistant.RunAsync(provider, request, _settings.MeetingTaskName, cts.Token);
+            Logger.Info($"IA : suggestion d'activité ({(request.FromSelector ? "sélecteur" : "changement")}, " +
+                        $"{request.Keywords.Count} mots-clés, {Math.Min(request.TaskNames.Count, TaskSuggestionAssistant.MaxTaskNames)} noms) → " +
+                        (answer.Existing != null ? "tâche existante" : answer.NewName != null ? "nom nouveau" : "rien") +
+                        $" en {watch.Elapsed.TotalSeconds:0.0} s ({provider.Name}, appel {_activityAiCalls} du jour).");
+            return answer;
+        }
+        catch (Exception ex)
+        {
+            Logger.Info($"IA : suggestion d'activité échouée après {watch.Elapsed.TotalSeconds:0.0} s ({provider.Name}) — {ex.Message}");
+            return null;
+        }
+    }
+
+    // ------------------------------------------------ Noms à vérifier
+
+    /// <summary>Propositions locales du moment (fautes, doublons), sans celles déjà refusées.</summary>
+    private List<NameReview.Item> FindNamesToReview() =>
+        NameReview.Find(_db.GetTaskUsage(), _timer?.CurrentTask?.Id, _settings.MeetingTaskName,
+                        NameReview.LoadDismissed(_db));
+
+    /// <summary>
+    /// « Noms à vérifier » : les propositions locales à cocher, et l'IA en plus sur un clic.
+    /// Ce qui est décoché en validant ne revient plus.
+    /// </summary>
+    private void OpenNameReview()
+    {
+        if (_modalOpen) return;
+        _modalOpen = true;
+        try
+        {
+            var rows = FindNamesToReview().Select(AiSuggestionsWindow.FromReview).ToList();
+            var header = rows.Count == 0
+                ? "Aucun nom à vérifier pour l'instant."
+                : $"{rows.Count} proposition(s) : fautes de frappe et doublons probables, repérés sur ce poste. " +
+                  "Une proposition cochée que tu décoches puis valides ne reviendra plus.";
+            var window = new AiSuggestionsWindow(header, rows, title: "TimeTracker — Noms à vérifier",
+                                                 askAi: _settings.AiEnabled ? AskAiCleanup : null);
+            var outcome = window.ShowModal(_dashboard);
+
+            NameReview.Dismiss(_db, outcome.Declined.Select(r => r.Key));
+            var (applied, skipped) = NameReview.Apply(_db, outcome.Chosen.Select(r => (r.Merge, r.Rename)),
+                                                      _timer.CurrentTask?.Id, "noms à vérifier");
+            if (outcome.Chosen.Count + outcome.Declined.Count > 0)
+                Logger.Info($"Noms à vérifier : {applied} appliqué(s), {outcome.Declined.Count} écarté(s)" +
+                            (skipped.Count > 0 ? $", {skipped.Count} impossible(s)" : "") + ".");
+            if (applied > 0)
+            {
+                _timer.ReloadCurrentTask();
+                RefreshTrayState();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("OpenNameReview", ex);
+            _tray?.ShowBalloon("Erreur dans la vérification des noms", ex.Message);
+        }
+        finally
+        {
+            _modalOpen = false;
+        }
+    }
+
+    /// <summary>Le nettoyage de l'assistant IA, ajouté à la liste des noms à vérifier (un appel, sur un clic).</summary>
+    private async Task<(IReadOnlyList<AiSuggestionsWindow.Row> Rows, string Summary)> AskAiCleanup(CancellationToken cancellation)
+    {
+        var provider = AiProviderFactory.Create(_settings);
+        var usage = _db.GetTaskUsage();
+        Logger.Info($"IA : {usage.Count} nom(s) de tâche envoyé(s) à {provider.Name} (noms à vérifier).");
+        var proposal = await TaskCleanupAssistant.RunAsync(provider, usage, cancellation);
+        Logger.Info($"IA : {proposal.Merges.Count} fusion(s), {proposal.Renames.Count} renommage(s) proposés, " +
+                    $"{proposal.Ignored.Count} écarté(s).");
+        return (AiSuggestionsWindow.FromProposal(proposal),
+                $"{provider.Name} : {proposal.Merges.Count} fusion(s) et {proposal.Renames.Count} renommage(s) ajoutés — " +
+                $"envoyé : {usage.Count} noms de tâches.");
     }
 
     /// <summary>
@@ -400,23 +737,6 @@ public partial class App : Application
             Logger.Error("CurrentSuggestions", ex);
             return Array.Empty<TaskSuggester.Suggestion>();
         }
-    }
-
-    /// <summary>
-    /// Ce que le rappel doit dire si l'activité contredit la tâche en cours : la suggestion de
-    /// tête n'est pas la tâche en cours, et pèse au moins deux fois plus que ce que les fenêtres
-    /// disent de celle-ci. En dessous, on se tait — un rappel qui doute à chaque fois n'est plus lu.
-    /// </summary>
-    private string? ActivityHint(TaskItem current)
-    {
-        var suggestions = CurrentSuggestions();
-        var top = suggestions.FirstOrDefault();
-        if (top is null || top.Task.Id == current.Id) return null;
-
-        var own = suggestions.FirstOrDefault(s => s.Task.Id == current.Id);
-        if (own != null && top.Score < 2 * own.Score) return null;
-
-        return $"D'après tes fenêtres, tu sembles plutôt sur « {top.Task.Name} » ({top.Reason}).";
     }
 
     /// <summary>Fin de journée : l'entrée en cours est clôturée (le temps est conservé).</summary>
@@ -472,8 +792,27 @@ public partial class App : Application
         TogglePause = TogglePause,
         StopTracking = StopTracking,
         ManageTasks = OpenTaskManager,
-        OpenSettings = OpenSettings
+        OpenSettings = OpenSettings,
+        NamesToReview = CountNamesToReview,
+        ReviewNames = () => { OpenNameReview(); _namesCountAt = DateTime.MinValue; }
     };
+
+    private int _namesCount;
+    private DateTime _namesCountAt = DateTime.MinValue;
+
+    /// <summary>
+    /// Compte du bandeau, recalculé au plus une fois par minute : le tableau de bord le demande à
+    /// chaque activation, et la comparaison deux à deux des noms n'est pas gratuite.
+    /// </summary>
+    private int CountNamesToReview()
+    {
+        if (DateTime.Now - _namesCountAt < TimeSpan.FromMinutes(1)) return _namesCount;
+        // Seules les propositions cochées d'office comptent : les autres (réunion d'un côté
+        // seulement) restent visibles dans la liste, sans tenir le bandeau allumé.
+        _namesCount = FindNamesToReview().Count(i => i.Recommended);
+        _namesCountAt = DateTime.Now;
+        return _namesCount;
+    }
 
     /// <summary>Bibliothèque des tâches : renommage, fusion, suppression, favoris.</summary>
     private void OpenTaskManager()
@@ -699,6 +1038,9 @@ public partial class App : Application
                     $"{meeting.Label}\nRelevé pour diagnostic, le suivi n'est pas modifié.");
                 return;
             }
+
+            // Une proposition de changement n'a plus de sens : la réunion est le changement.
+            _shiftWindow?.Expire("réunion");
 
             // Un suivi en pause ou à l'arrêt ne donne rien à « reprendre » après la réunion :
             // mieux vaut laisser le rappel reposer la question que redémarrer une tâche au hasard.
@@ -994,21 +1336,22 @@ public partial class App : Application
     private void OnReminderDue(TaskItem task)
     {
         if (_reminderOpen) return;
+        // Une proposition de changement est à l'écran : c'est déjà la question, en mieux.
+        if (_shiftWindow != null) { _timer.SnoozeReminder(); return; }
         _reminderOpen = true;
-        var hint = ActivityHint(task);
-        // La raison (un titre de fenêtre) reste à l'écran : le journal ne dit que « suggestion ».
-        Logger.Info($"Rappel affiché (« {task.Name} »){(hint is null ? "" : " — avec une suggestion d'activité")}.");
+        Logger.Info($"Rappel affiché (« {task.Name} »).");
 
-        ReminderPopup.Ask(task.Name, _settings.ReminderSound, keepGoing =>
+        _reminderPopup = ReminderPopup.Ask(task.Name, _settings.ReminderSound, keepGoing =>
         {
             _reminderOpen = false;
+            _reminderPopup = null;
             if (keepGoing)
                 _timer.SnoozeReminder();
             else
                 // « Non, je change » : le basculement a pu avoir lieu avant le rappel,
                 // d'où la proposition de décaler le début de 5 ou 15 minutes.
                 OpenTaskSelector(offerBackdate: true);
-        }, hint);
+        });
     }
 
     /// <summary>Rappel pendant une pause : ce temps n'est compté nulle part, on le signale.</summary>
@@ -1088,6 +1431,10 @@ public partial class App : Application
             {
                 _timer?.SnoozeReminder();
                 Logger.Info($"Rappel repoussé ({reason}).");
+                _lastWake = DateTime.Now;
+                // Une proposition ouverte avant la veille parle d'une activité d'hier soir.
+                if (_shiftWindow != null && DateTime.Now - _shiftWindow.OpenedAt > ActivityShiftWindow.Lifetime)
+                    _shiftWindow.Expire("périmée au réveil");
                 HandleAbsence(DateTime.Now);
             }
             catch (Exception ex)
@@ -1143,10 +1490,17 @@ public partial class App : Application
         _tray.UpdateTooltip($"{task.Name} — {Format(elapsed)}");
     }
 
-    private void OnCurrentTaskChanged(TaskItem? task) => RefreshTrayState();
+    private void OnCurrentTaskChanged(TaskItem? task)
+    {
+        // Changement fait ailleurs (sélecteur, correction, pause) : la proposition est dépassée.
+        _shiftWindow?.Expire("tâche changée ailleurs");
+        _namesCountAt = DateTime.MinValue;   // une tâche a pu être créée
+        RefreshTrayState();
+    }
 
     private void RefreshTrayState()
     {
+        if (_tray is null) return;   // --selftest : ni barre système ni icône
         if (_timer.CurrentTask is null)
         {
             _tray.UpdateTooltip("TimeTracker — aucune tâche");
@@ -1345,8 +1699,12 @@ public partial class App : Application
             var sequencesOk = CheckMeetingSequences();
             var absenceOk = CheckAbsenceCutoff();
             var duplicatesOk = CheckTaskSimilarity();
+            var namesOk = CheckNameHygiene();
             var suggestOk = CheckTaskSuggester();
+            var shiftOk = CheckShiftDetector() && CheckShiftWiring();
+            var learningOk = CheckActivityLearning();
             var aiOk = CheckAiAssistant();
+            var activityAiOk = CheckActivityAi();
             // Objectif hebdo : aller-retour en base avec une décimale, quelle que soit la culture.
             var goalSettings = _db.LoadSettings();
             goalSettings.DailyHoursGoal = 7.5;
@@ -1409,7 +1767,8 @@ public partial class App : Application
                         $"réunion_après_arrêt={afterStopOk}, réunion_nommée={nameMeetingOk}, " +
                         $"réunion_titre_posé={appliedOk}, agenda={calendarOk}, " +
                         $"enchaînements={sequencesOk}, absence={absenceOk}, " +
-                        $"doublons={duplicatesOk}, suggestions={suggestOk}, objectif={goalOk}, IA={aiOk}, " +
+                        $"doublons={duplicatesOk}, noms={namesOk}, suggestions={suggestOk}, changement={shiftOk}, " +
+                        $"apprentissage={learningOk}, objectif={goalOk}, IA={aiOk}, IA_activité={activityAiOk}, " +
                         $"titre_tronqué={shortenOk}");
         }
         catch (Exception ex)
@@ -1633,25 +1992,42 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Doublons de tâches : les cas réellement vus dans cinq semaines de journaux — coquille,
-    /// accent, majuscule, espace autour d'une barre, chiffre collé — et deux tâches proches
-    /// qui n'en sont pas.
+    /// Doublons de tâches, comparés mot à mot : les cas réellement vus dans les journaux —
+    /// coquille, accent, espace autour d'une barre, chiffre collé, même sujet avec et sans
+    /// « Réunion — » — et les faux doublons que la comparaison du nom entier proposait le
+    /// 2026-09-29 : même gabarit, client ou sens différent.
     /// </summary>
     private bool CheckTaskSimilarity()
     {
+        bool Dup(string a, string b) => TaskSimilarity.IsDuplicate(a, b, out _);
+
         bool normalized = TaskSimilarity.Normalize("Débug Dornac") == "debug dornac"
                           && TaskSimilarity.Normalize("Config Flow1 et 2") == "config flow 1 et 2"
                           && TaskSimilarity.Normalize("ORVANE Groupe / Contoso") == "orvane groupe contoso";
 
-        bool duplicates = TaskSimilarity.Similarity("Debug Dornac", "Débug Dornac") == 1
-                          && TaskSimilarity.Similarity("Config kestrio", "Config Kestrio") == 1
-                          && TaskSimilarity.Similarity("Config Flow1 et 2", "Conflig Flow 1 et 2") >= TaskSimilarity.Threshold
-                          && TaskSimilarity.Similarity("Suivi projet facturation électronique ORVANE Groupe / Contoso",
-                                                       "Suivi projet facturation électronique ORVANE Groupe/Contoso") == 1;
+        bool duplicates = Dup("Debug Dornac", "Débug Dornac")
+                          && Dup("Config kestrio", "Config Kestrio")
+                          && Dup("Config Flow1 et 2", "Conflig Flow 1 et 2")
+                          && Dup("Suivi projet facturation électronique ORVANE Groupe / Contoso",
+                                 "Suivi projet facturation électronique ORVANE Groupe/Contoso")
+                          && Dup("Onborading Tessal", "Onboarding Tessal")          // lettres inversées
+                          && Dup("Onboarding Tesal", "Onboarding Tessal")           // lettre oubliée
+                          && Dup("Réunion (\"Point Hebdo PRJ - Velmora\")", "Réunion — Point Hebdo PRJ - Velmora")
+                          && Dup("Point Hebdo PRJ - Velmora", "Réunion — Point Hebdo PRJ - Velmora")
+                          // Un sujet d'agenda long qui gagne un mot : toléré.
+                          && Dup("Réunion — Point hebdo projet Velmora Contoso", "Réunion — AR: Point hebdo projet Velmora Contoso");
 
-        bool distinct = TaskSimilarity.Similarity("Config Orvane", "Config Tessal") < TaskSimilarity.Threshold
-                        && TaskSimilarity.Similarity("Réunion Velmora", "Réunion Kestrio") < TaskSimilarity.Threshold
-                        && TaskSimilarity.Similarity("Config Flow1 et 2", "Config Flow 3") < TaskSimilarity.Threshold;
+        bool distinct = !Dup("Config Orvane", "Config Tessal")
+                        && !Dup("Réunion Velmora", "Réunion Kestrio")
+                        && !Dup("Config Flow1 et 2", "Config Flow 3")
+                        && !Dup("Config Orvane Flow1", "Config Orvane Flow2")          // nombre différent
+                        && !Dup("Suivi projet facturation électronique ORVANE/Contoso",
+                                "Suivi projet facturation électronique VELMORA/Contoso")         // client différent
+                        && !Dup("Adaptation mapping EDI Kestrio",
+                                "Adaptation mapping EDI Tessal")
+                        && !Dup("Paramétrage flux Outgoing Orvane", "Paramétrage flux Incoming Orvane")
+                        && !Dup("Réunion Orvane", "Orvane")                                      // réunion ≠ travail
+                        && !Dup("Tests Orvane", "Tests Out Orvane");                             // mot de plus, nom court
 
         var tasks = new List<TaskItem>
         {
@@ -1666,7 +2042,328 @@ public partial class App : Application
                      && pairs.Any(p => p.A.Id == 4 && p.B.Id == 5)
                      && pairs.Any(p => p.A.Id == 1 && p.B.Id == 2);
 
+        Logger.Info($"SELFTEST doublons : normalisation={normalized}, vrais={duplicates}, faux={distinct}, liste={found}");
         return normalized && duplicates && distinct && found;
+    }
+
+    /// <summary>
+    /// Fautes de frappe : correction mot à mot d'après le vocabulaire des autres tâches, « Tu
+    /// voulais dire … ? » à la saisie, et les propositions du bandeau (fusion, renommage, refus
+    /// mémorisé). Les pièges vus sur les vrais noms : un pluriel, « e-reporting » écrit d'un bloc,
+    /// un nom propre à deux lettres d'un mot courant, une substitution sur un mot court.
+    /// </summary>
+    private bool CheckNameHygiene()
+    {
+        var names = new[]
+        {
+            "Onboarding Orvane", "Onboarding Velmora", "Onboarding Kestrio", "Config Orvane",
+            "Config Velmora", "Config Kestrio", "Tests Orvane", "Tests Velmora", "Tests Kestrio",
+            "Reporting Orvane", "Reporting Velmora", "Reporting Kestrio", "Internal sync", "Internal review",
+            "Internal Orvane", "Data check", "Data import", "Data export"
+        };
+        bool typosOk =
+            TaskSimilarity.CorrectTypos("Onborading Tessal", names, 0)?.Name == "Onboarding Tessal"
+            && TaskSimilarity.CorrectTypos("Conflig Tessal", names, 0)?.Name == "Config Tessal"
+            && TaskSimilarity.CorrectTypos("Test Tessal", names, 0) is null           // pluriel : pas une faute
+            && TaskSimilarity.CorrectTypos("Tax ereporting Tessal", names, 0) is null // e-reporting d'un bloc
+            && TaskSimilarity.CorrectTypos("Format Inferbal Tessal", names, 0) is null // deux lettres de « internal »
+            && TaskSimilarity.CorrectTypos("Date Tessal", names, 0) is null            // substitution, mot court
+            && TaskSimilarity.CorrectTypos("Onboarding Tessal", names, 0) is null;
+
+        var tasks = names.Select((n, i) => new TaskItem { Id = i + 1, Name = n }).ToList();
+        var existingHint = NameReview.CheckNewName("onboarding orvanne", tasks, "Réunion");
+        var typoHint = NameReview.CheckNewName("Onborading Tessal", tasks, "Réunion");
+        bool hintsOk = existingHint is { IsExisting: true, Suggested: "Onboarding Orvane" }
+                       && typoHint is { IsExisting: false, Suggested: "Onboarding Tessal" }
+                       && NameReview.CheckNewName("Config Orvane", tasks, "Réunion") is null   // exacte
+                       && NameReview.CheckNewName("Refonte Tessal", tasks, "Réunion") is null;
+
+        // Bandeau : une fusion (la tâche qui a le moins d'entrées part dans l'autre, jamais la
+        // tâche en cours), un renommage, et ce qui a été refusé ne revient pas.
+        TaskUsage U(long id, string name, int count) => new() { Task = new TaskItem { Id = id, Name = name }, EntryCount = count };
+        var usage = names.Select((n, i) => U(i + 1, n, 3)).ToList();
+        usage.Add(U(100, "Conflig Orvane", 1));                 // doublon de « Config Orvane »
+        usage.Add(U(101, "Onborading Dornac", 2));              // faute, sans tâche jumelle
+        usage.Add(U(102, "Réunion — Point Hebdo PRJ - Velmora", 4));
+        usage.Add(U(103, "Point Hebdo PRJ - Velmora", 1));
+        var items = NameReview.Find(usage, currentTaskId: null, "Réunion", new HashSet<string>());
+        var merge = items.FirstOrDefault(i => i.Merge?.From == "Conflig Orvane");
+        var rename = items.FirstOrDefault(i => i.Rename?.From == "Onborading Dornac");
+        var meeting = items.FirstOrDefault(i => i.Merge?.From == "Point Hebdo PRJ - Velmora");
+        var dismissed = NameReview.Find(usage, null, "Réunion", new HashSet<string> { merge?.Key ?? "?" });
+        var protectedCurrent = NameReview.Find(usage, currentTaskId: 100, "Réunion", new HashSet<string>());
+        bool reviewOk = merge is { Recommended: true } && merge.Merge!.Into == "Config Orvane"
+                        && rename?.Rename?.To == "Onboarding Dornac"
+                        // Réunion d'un côté seulement : proposée, mais pas cochée d'office.
+                        && meeting is { Recommended: false } && meeting.Merge!.Into == "Réunion — Point Hebdo PRJ - Velmora"
+                        && dismissed.All(i => i.Key != merge.Key)
+                        && protectedCurrent.All(i => i.Merge?.From != "Conflig Orvane");
+
+        // Refus mémorisés en base.
+        NameReview.Dismiss(_db, new[] { "m:1:2", "r:3:x" });
+        NameReview.Dismiss(_db, new[] { "m:1:2", "" });
+        var stored = NameReview.LoadDismissed(_db);
+        bool dismissOk = stored.Count == 2 && stored.Contains("m:1:2") && stored.Contains("r:3:x");
+
+        Logger.Info($"SELFTEST noms : fautes={typosOk}, saisie={hintsOk}, bandeau={reviewOk}, refus={dismissOk}");
+        return typosOk && hintsOk && reviewOk && dismissOk;
+    }
+
+    /// <summary>
+    /// Détection d'un changement de tâche sur des relevés fabriqués : 20 min sur un classeur
+    /// Orvane puis 6 min sur autre chose → proposé, depuis la première fenêtre étrangère ; un coup
+    /// d'œil d'une minute ne déclenche rien ; la condition doit tenir deux évaluations ; une fois
+    /// proposé, le même changement ne revient pas ; « je reste » le range dans la tâche.
+    /// </summary>
+    private bool CheckShiftDetector()
+    {
+        var start = DateTime.Now.AddMinutes(-30);
+        List<ActivityProbe.Sample> Run(params (string Title, string Process, int Minutes)[] parts)
+        {
+            var list = new List<ActivityProbe.Sample>();
+            var at = start;
+            foreach (var (title, process, minutes) in parts)
+                for (int i = 0; i < minutes * 12; i++) { list.Add(new ActivityProbe.Sample(at, process, title)); at = at.AddSeconds(5); }
+            return list;
+        }
+        var none = new HashSet<string>();
+        ActivityShiftDetector.Context Ctx(long id = 1) =>
+            new(id, "Config Orvane", start, none, w => w == "contoso");
+
+        const string orvane = "Orvane - mapping INVOIC.xlsx - Excel";
+        const string velmora = "RE: Velmora - commande 4512 - camille.durand@contoso.test - Outlook";
+
+        // 20 min Orvane, puis 6 min Velmora : première évaluation → rien (hystérésis), seconde → proposé.
+        var samples = Run((orvane, "EXCEL", 20), (velmora, "OUTLOOK", 6));
+        var now = samples[^1].At;
+        var detector = new ActivityShiftDetector();
+        var first = detector.Evaluate(now.AddSeconds(-60), samples.Where(s => s.At <= now.AddSeconds(-60)).ToList(), Ctx());
+        var shift = detector.Evaluate(now, samples, Ctx());
+        bool shiftOk = first is null && shift != null
+                       && shift.Since == start.AddMinutes(20)
+                       && shift.Keywords.Contains("velmora") && !shift.Keywords.Contains("orvane")
+                       && !shift.Keywords.Contains("durand")                  // adresse e-mail : jamais un mot-clé
+                       && shift.DominantTitle == velmora
+                       && ActivityNaming.FromTitle(velmora, "OUTLOOK") == "Velmora commande 4512";
+
+        // Déjà proposé : pas une seconde fois, même après le délai.
+        detector.Proposed(shift!, now);
+        bool onceOk = detector.Evaluate(now.AddMinutes(1), samples, Ctx()) is null;
+
+        // Un coup d'œil d'une minute à un mail, puis retour : rien.
+        var glance = Run((orvane, "EXCEL", 20), (velmora, "OUTLOOK", 1), (orvane, "EXCEL", 5));
+        var d2 = new ActivityShiftDetector();
+        var gNow = glance[^1].At;
+        d2.Evaluate(gNow.AddSeconds(-60), glance, Ctx());
+        bool glanceOk = d2.Evaluate(gNow, glance, Ctx()) is null;
+
+        // Même fenêtre qu'au début de la tâche : ce n'est pas un changement.
+        var same = Run((orvane, "EXCEL", 26));
+        var d3 = new ActivityShiftDetector();
+        d3.Evaluate(same[^1].At.AddSeconds(-60), same, Ctx());
+        bool sameOk = d3.Evaluate(same[^1].At, same, Ctx()) is null;
+
+        // Mot appris pour la tâche : « velmora » vu avec « Config Orvane » → pas un changement.
+        var learned = new ActivityShiftDetector();
+        var ctxLearned = new ActivityShiftDetector.Context(1, "Config Orvane", start,
+            new HashSet<string> { "velmora", "commande" }, _ => false);
+        learned.Evaluate(now.AddSeconds(-60), samples, ctxLearned);
+        bool learnedOk = learned.Evaluate(now, samples, ctxLearned) is null;
+
+        // Tâche fourre-tout : « velmora » a été appris avec elle (mails de tous les clients), mais
+        // c'est le nom d'une autre tâche — il ne la décrit pas, le changement est vu.
+        var catchAll = new ActivityShiftDetector();
+        var ctxCatchAll = new ActivityShiftDetector.Context(1, "Gen admin, Intranet, e-mails", start,
+            new HashSet<string> { "velmora", "commande", "orvane", "mapping", "invoic" }, _ => false,
+            w => w is "velmora" or "orvane");
+        catchAll.Evaluate(now.AddSeconds(-60), samples, ctxCatchAll);
+        var caught = catchAll.Evaluate(now, samples, ctxCatchAll);
+        learnedOk = learnedOk && caught != null && caught.Keywords.Contains("velmora");
+
+        // « Je reste » : l'activité proposée rejoint la tâche en cours.
+        var d4 = new ActivityShiftDetector();
+        d4.Evaluate(now.AddSeconds(-60), samples, Ctx());
+        var s4 = d4.Evaluate(now, samples, Ctx());
+        if (s4 != null) d4.Stayed(s4);
+        d4.Evaluate(now.AddSeconds(30), samples, Ctx());
+        bool stayOk = s4 != null && d4.Evaluate(now.AddSeconds(60), samples, Ctx()) is null;
+
+        // Silence (réunion, pause…) : l'hystérésis repart de zéro.
+        var d5 = new ActivityShiftDetector();
+        d5.Evaluate(now.AddSeconds(-60), samples, Ctx());
+        d5.Silence();
+        bool silenceOk = d5.Evaluate(now, samples, Ctx()) is null;
+
+        // Noms tirés des titres : marque d'application, préfixe de réponse, extension retirés.
+        bool namingOk = ActivityNaming.FromTitle("Orvane - mapping INVOIC.xlsx - Excel", "EXCEL") == "Orvane mapping INVOIC"
+                        && ActivityNaming.FromTitle("Portail Tessal - suivi des factures - Personnel - Microsoft​ Edge", "msedge")
+                           == "Portail Tessal"
+                        && ActivityNaming.FromTitle("Boîte de réception - camille.durand@contoso.test - Outlook", "OUTLOOK") is null;
+
+        Logger.Info($"SELFTEST changement : détecté={shiftOk}, une_fois={onceOk}, coup_d_œil={glanceOk}, " +
+                    $"même_fenêtre={sameOk}, appris={learnedOk}, je_reste={stayOk}, silence={silenceOk}, nom={namingOk}");
+        return shiftOk && onceOk && glanceOk && sameOk && learnedOk && stayOk && silenceOk && namingOk;
+    }
+
+    /// <summary>
+    /// Le câblage d'<c>App</c> autour de la proposition, sans fenêtre : ce qui est proposé
+    /// (tâche existante, nom tiré du titre, heure bornée à l'entrée en cours), puis ce que fait
+    /// chaque réponse — nouvelle tâche antidatée, tâche existante à partir de maintenant, « je
+    /// reste », et une réponse arrivée après un changement de tâche fait ailleurs.
+    /// </summary>
+    private bool CheckShiftWiring()
+    {
+        var previousTimer = _timer;
+        _timer = new TimerService(_db, 30);
+        try
+        {
+            var now = DateTime.Now;
+            var current = _db.GetOrCreateTask("Selftest câblage Orvane");
+            // « Kestrio » : un mot qu'aucune autre tâche de la base jetable ne porte (sinon il ne désigne rien).
+            var velmora = _db.GetOrCreateTask("Selftest câblage suivi Kestrio");
+            _timer.StartTask(current, now.AddMinutes(-30));
+            var firstEntry = _timer.CurrentEntryId;
+
+            const string title = "RE: Kestrio - commande 4512 - Outlook";
+            var samples = Enumerable.Range(0, 84)
+                .Select(i => new ActivityProbe.Sample(now.AddMinutes(-8).AddSeconds(5 * i), "OUTLOOK", title)).ToList();
+            ActivityShiftDetector.Shift Shift(DateTime since) => new(since, TimeSpan.FromMinutes(7), title,
+                TimeSpan.FromMinutes(7), new[] { "kestrio", "commande" }, new[] { "OUTLOOK" }, samples);
+
+            var p = BuildShiftProposal(current, Shift(now.AddMinutes(-8)), new Dictionary<long, Dictionary<string, int>>());
+            // Un début de changement antérieur à l'entrée en cours est ramené à son début.
+            var clamped = BuildShiftProposal(current, Shift(now.AddHours(-2)), new Dictionary<long, Dictionary<string, int>>());
+            bool proposalOk = p.Local?.Task.Id == velmora.Id && p.LocalName == "Kestrio commande 4512"
+                              && p.Since == now.AddMinutes(-8) && p.Ai is null
+                              && clamped.Since == _timer.CurrentStart;
+
+            // Nouvelle tâche, antidatée : l'entrée d'avant est clôturée à l'heure du changement.
+            OnShiftAnswered(current, p.Shift, p.Since,
+                new ShiftAnswer(ShiftAnswerKind.New, null, "Selftest câblage commande Velmora", true, "IA"));
+            var closed = firstEntry is long id ? _db.GetEntry(id) : null;
+            bool newOk = _timer.CurrentTask?.Name == "Selftest câblage commande Velmora"
+                         && _timer.CurrentStart == p.Since && closed?.EndedAt == p.Since;
+
+            // Tâche existante, à partir de maintenant.
+            var before = DateTime.Now;
+            var nowCurrent = _timer.CurrentTask!;
+            OnShiftAnswered(nowCurrent, p.Shift, p.Since, new ShiftAnswer(ShiftAnswerKind.Existing, velmora, null, false, "local"));
+            bool existingOk = _timer.CurrentTask?.Id == velmora.Id && _timer.CurrentStart >= before;
+
+            // Tâche proposée fusionnée pendant que la fenêtre était ouverte : rien ne bouge, et
+            // surtout l'entrée en cours reste ouverte (avant, elle était clôturée pour rien).
+            var merged = _db.GetOrCreateTask("Selftest câblage fusionnée");
+            _db.MergeTasks(merged.Id, velmora.Id);
+            var entryBefore = _timer.CurrentEntryId;
+            OnShiftAnswered(velmora, p.Shift, p.Since, new ShiftAnswer(ShiftAnswerKind.Existing, merged, null, true, "local"));
+            existingOk = existingOk && _timer.CurrentTask?.Id == velmora.Id && _timer.CurrentEntryId == entryBefore
+                         && _db.GetOpenEntry()?.Id == entryBefore;
+
+            // Réponse arrivée trop tard : la tâche a changé entre-temps, rien ne bouge.
+            OnShiftAnswered(current, p.Shift, p.Since, new ShiftAnswer(ShiftAnswerKind.New, null, "Selftest câblage tardive", true, "local"));
+            bool lateOk = _timer.CurrentTask?.Id == velmora.Id && _db.FindTaskByName("Selftest câblage tardive") is null;
+
+            // « Je reste » : rien ne bascule.
+            OnShiftAnswered(velmora, p.Shift, p.Since, new ShiftAnswer(ShiftAnswerKind.Stay, null, null, false, "refusée"));
+            bool stayOk = _timer.CurrentTask?.Id == velmora.Id;
+
+            _timer.Stop();
+            Logger.Info($"SELFTEST câblage changement : proposition={proposalOk}, nouvelle={newOk}, " +
+                        $"existante={existingOk}, tardive={lateOk}, reste={stayOk}");
+            return proposalOk && newOk && existingOk && lateOk && stayOk;
+        }
+        finally
+        {
+            _timer = previousTimer;
+        }
+    }
+
+    /// <summary>
+    /// Apprentissage d'après la base : un relevé va à la tâche que l'entrée désigne après coup
+    /// (bascule antidatée comprise), rien pendant une réunion ni hors de toute entrée (pause).
+    /// </summary>
+    private bool CheckActivityLearning()
+    {
+        var t0 = DateTime.Today.AddHours(10);
+        var entries = new List<TimeEntry>
+        {
+            new() { Id = 1, TaskId = 10, StartedAt = t0, EndedAt = t0.AddMinutes(10) },
+            // Bascule antidatée à 10:10 vers la tâche 20 : ces minutes-là sont à elle.
+            new() { Id = 2, TaskId = 20, StartedAt = t0.AddMinutes(10), EndedAt = t0.AddMinutes(20) },
+            new() { Id = 3, TaskId = 30, StartedAt = t0.AddMinutes(20), EndedAt = t0.AddMinutes(30), IsMeeting = true },
+            new() { Id = 4, TaskId = 40, StartedAt = t0.AddMinutes(40), EndedAt = null }   // ouverte
+        };
+        var samples = new List<ActivityProbe.Sample>
+        {
+            new(t0.AddMinutes(5), "EXCEL", "Orvane mapping"),
+            new(t0.AddMinutes(12), "OUTLOOK", "Velmora commande"),
+            new(t0.AddMinutes(25), "ms-teams", "Point Hebdo PRJ"),     // réunion : pas appris
+            new(t0.AddMinutes(35), "EXCEL", "Kestrio pause"),          // aucune entrée : pas appris
+            new(t0.AddMinutes(45), "TimeTracker", "Tableau de bord"),  // TimeTracker : pas appris
+            new(t0.AddMinutes(50), "EXCEL", "Tessal portail")
+        };
+        var learned = ActivityLearning.Attribute(samples, entries);
+        bool ok = learned.Count == 3
+                  && learned[10].ContainsKey("orvane") && !learned[10].ContainsKey("velmora")
+                  && learned[20]["velmora"] == 5
+                  && !learned.ContainsKey(30)
+                  && learned[40].ContainsKey("tessal") && !learned[40].ContainsKey("tableau");
+
+        // Entrées recouvrant une plage : l'entrée ouverte en fait partie.
+        var task = _db.GetOrCreateTask("Selftest recouvrement");
+        var open = _db.StartEntry(task.Id, DateTime.Now.AddMinutes(-30));
+        var overlapping = _db.GetEntriesOverlapping(DateTime.Now.AddMinutes(-20), DateTime.Now.AddMinutes(-10));
+        _db.EndEntry(open, DateTime.Now);
+        bool overlapOk = overlapping.Any(e => e.Id == open);
+
+        Logger.Info($"SELFTEST apprentissage : attribution={ok}, recouvrement={overlapOk}");
+        return ok && overlapOk;
+    }
+
+    /// <summary>
+    /// Suggestion par l'IA, sans réseau : ce qui part (mots-clés, pas de titre), la lecture d'une
+    /// réponse réaliste (balises, nom existant à la casse près, quasi-doublon, nom inventé,
+    /// tâche en cours, JSON absent) et le texte « ce qui est parti ».
+    /// </summary>
+    private bool CheckActivityAi()
+    {
+        var names = new[] { "Config Orvane", "Onboarding Velmora", "Gen admin, Intranet, e-mails" };
+        var request = new TaskSuggestionAssistant.Request("Config Orvane", new[] { "velmora", "commande", "4512" },
+                                                          new[] { "OUTLOOK" }, names, FromSelector: false);
+        var prompt = TaskSuggestionAssistant.BuildPrompt(request);
+        bool promptOk = prompt.Contains("velmora, commande, 4512") && prompt.Contains("- Onboarding Velmora")
+                        && prompt.Contains("Tâche en cours : « Config Orvane »") && prompt.Contains("\"new_name\"");
+
+        var existing = TaskSuggestionAssistant.Parse("```json\n{\"existing\":\"onboarding velmora\",\"new_name\":\"\",\"why\":\"client cité\"}\n```",
+                                                     names, "Config Orvane");
+        var nearDup = TaskSuggestionAssistant.Parse("{\"existing\":\"\",\"new_name\":\"Onborading Velmora\",\"why\":\"\"}", names, "Config Orvane");
+        var fresh = TaskSuggestionAssistant.Parse("Voici : {\"existing\":\"Tâche inventée\",\"new_name\":\"« Commande Velmora 4512 »\",\"why\":\"mail\"}",
+                                                  names, "Config Orvane");
+        var current = TaskSuggestionAssistant.Parse("{\"existing\":\"Config Orvane\",\"new_name\":\"\",\"why\":\"\"}", names, "Config Orvane");
+        bool malformed;
+        try { TaskSuggestionAssistant.Parse("désolé, je ne sais pas", names, null); malformed = false; }
+        catch (FormatException) { malformed = true; }
+
+        bool parseOk = existing.Existing == "Onboarding Velmora" && existing.NewName is null && existing.Why == "client cité"
+                       && nearDup.Existing == "Onboarding Velmora" && nearDup.NewName is null
+                       && fresh.Existing is null && fresh.NewName == "Commande Velmora 4512"
+                       && current.Existing is null && current.NewName is null
+                       && malformed;
+
+        var sent = TaskSuggestionAssistant.DescribeSent(request, "Gemini / test");
+        bool sentOk = sent.Contains("3 mots-clés (velmora, commande, 4512)") && sent.Contains("3 noms de tâches")
+                      && sent.Contains("Jamais un titre entier");
+
+        // Mots-clés : jamais les mots communs, jamais les fenêtres de TimeTracker.
+        var keywords = ActivityShiftDetector.Keywords(new[]
+        {
+            new ActivityProbe.Sample(DateTime.Now, "OUTLOOK", "Velmora commande - Outlook"),
+            new ActivityProbe.Sample(DateTime.Now, "TimeTracker", "Tableau de bord secret"),
+        }, w => w == "commande");
+        bool keywordsOk = keywords.SequenceEqual(new[] { "velmora" });
+
+        Logger.Info($"SELFTEST IA activité : prompt={promptOk}, lecture={parseOk}, envoyé={sentOk}, mots_clés={keywordsOk}");
+        return promptOk && parseOk && sentOk && keywordsOk;
     }
 
     /// <summary>
@@ -2114,8 +2811,26 @@ public partial class App : Application
         Render("TaskSelectorPopup", () => new TaskSelectorPopup(recent, null));
         Render("TaskSelectorPopup/Suggestion", () => new TaskSelectorPopup(recent, null,
             suggestions: new Dictionary<long, string> { [recent[0].Id] = "12 min sur « Fenêtre de test — classeur.xlsx »" }));
-        Render("ReminderPopup/Suggestion", () => new ReminderPopup(task.Name, playSound: false,
-            hint: "D'après tes fenêtres, tu sembles plutôt sur « Tâche favorite de test » (12 min sur « classeur.xlsx »)."));
+        var uiTasks = _db.GetAllTasks();
+        Render("TaskSelectorPopup/Tu voulais dire", () => new TaskSelectorPopup(recent, "Fenêtre de tset",
+            checkName: typed => NameReview.CheckNewName(typed, uiTasks, _settings.MeetingTaskName)));
+        const string uiSent = "Envoyé à Gemini / gemini-3.5-flash-lite : 5 mots-clés (velmora, commande, 4512, livraison, retard), " +
+                              "applis OUTLOOK, le nom de la tâche en cours et 42 noms de tâches. Jamais un titre entier.";
+        Render("TaskSelectorPopup/IA", () => new TaskSelectorPopup(recent, null),
+            w => ((TaskSelectorPopup)w).ShowAiSuggestion("Commande Velmora en retard", false, "mail client cité", uiSent));
+        ActivityShiftWindow ShiftWindow(TaskItem? existing) => new(task.Name, DateTime.Now.AddMinutes(-8),
+            TimeSpan.FromMinutes(7), "RE: Velmora - commande 4512 - Outlook", TimeSpan.FromMinutes(5),
+            existing, existing is null ? null : "4 min sur « Velmora - suivi.xlsx » (fenêtre déjà vue avec cette tâche)",
+            "Velmora commande 4512", typed => NameReview.CheckNewName(typed, uiTasks, _settings.MeetingTaskName), playSound: false);
+        Render("ActivityShiftWindow", () => ShiftWindow(favorite));
+        Render("ActivityShiftWindow/IA en attente", () => ShiftWindow(null),
+            w => ((ActivityShiftWindow)w).ShowAiPending("Gemini / gemini-3.5-flash-lite", uiSent));
+        Render("ActivityShiftWindow/IA", () => ShiftWindow(favorite), w =>
+        {
+            var shift = (ActivityShiftWindow)w;
+            shift.ShowAiPending("Gemini / gemini-3.5-flash-lite", uiSent);
+            shift.ShowAiAnswer(null, "Commande Velmora en retard", "mail client cité");
+        });
         Render("ExportRangeWindow", () => new ExportRangeWindow(DateTime.Now.Date.AddDays(-30), DateTime.Now.Date));
         Render("TaskSelectorPopup/Décalage", () => new TaskSelectorPopup(recent, null, offerBackdate: true));
         Render("ReminderPopup", () => new ReminderPopup(task.Name, playSound: false));
@@ -2168,6 +2883,20 @@ public partial class App : Application
                 new[] { new TaskCleanupAssistant.Merge("Fenetre de Test", "Fenêtre de test", "faute de frappe") },
                 new[] { new TaskCleanupAssistant.Rename("Selftest A", "Selftest — A", "cohérence") },
                 new[] { "fusion « Inventée » → « Fenêtre de test » (tâche inconnue)" })));
+        Render("AiSuggestionsWindow/Noms à vérifier", () =>
+        {
+            var review = NameReview.Find(new List<TaskUsage>
+                {
+                    new() { Task = new TaskItem { Id = 1, Name = "Config Orvane" }, EntryCount = 6 },
+                    new() { Task = new TaskItem { Id = 2, Name = "Conflig Orvane" }, EntryCount = 1 },
+                    new() { Task = new TaskItem { Id = 3, Name = "Point Hebdo PRJ - Velmora" }, EntryCount = 1 },
+                    new() { Task = new TaskItem { Id = 4, Name = "Réunion — Point Hebdo PRJ - Velmora" }, EntryCount = 4 }
+                }, null, _settings.MeetingTaskName, new HashSet<string>())
+                .Select(AiSuggestionsWindow.FromReview);
+            return new AiSuggestionsWindow("2 proposition(s) : fautes de frappe et doublons probables, repérés sur ce poste",
+                review, title: "TimeTracker — Noms à vérifier",
+                askAi: _ => Task.FromResult<(IReadOnlyList<AiSuggestionsWindow.Row>, string)>((Array.Empty<AiSuggestionsWindow.Row>(), "")));
+        });
         // Objectif posé pour que la barre d'avancement se rende (masquée à zéro). Base jetable.
         _settings.DailyHoursGoal = 7.5;
         Render("Dashboard/Jour", () => new DashboardWindow(_db, _settings, BuildUiTestActions(timer)));
@@ -2181,7 +2910,8 @@ public partial class App : Application
         timer.Flush();
         Logger.Info($"UITEST {(results.Any(r => r.Contains("ÉCHEC")) ? "ÉCHEC" : "OK")} : {string.Join(", ", results)}");
 
-        void Render(string name, Func<Window> factory)
+        // afterShow : ce qui n'arrive qu'une fois la fenêtre affichée (réponse de l'IA).
+        void Render(string name, Func<Window> factory, Action<Window>? afterShow = null)
         {
             Window? window = null;
             try
@@ -2198,6 +2928,8 @@ public partial class App : Application
                 window.Top = -32000;
                 window.ShowInTaskbar = false;
                 window.Show();
+                window.UpdateLayout();
+                afterShow?.Invoke(window);
                 window.UpdateLayout();
                 Dispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
                 if (snapshotDir != null) SaveSnapshot(window, snapshotDir, name);
@@ -2223,7 +2955,9 @@ public partial class App : Application
     {
         State = () => timer.CurrentTask is null
             ? ("Aucune tâche en cours", false, false)
-            : ($"▶ {timer.CurrentTask.Name} — {Format(timer.Elapsed)}", timer.IsPaused, true)
+            : ($"▶ {timer.CurrentTask.Name} — {Format(timer.Elapsed)}", timer.IsPaused, true),
+        // Bandeau affiché pour que le rendu le couvre.
+        NamesToReview = () => 3
     };
 
     /// <summary>Enregistre le rendu d'une fenêtre en PNG (revue visuelle sans piloter l'écran).</summary>
@@ -2261,7 +2995,10 @@ public partial class App : Application
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         SystemEvents.SessionSwitch -= OnSessionSwitch;
         _meetings?.Stop();
-        _learnTimer?.Stop();
+        _activityTimer?.Stop();
+        _shiftWindow?.Expire("fermeture de TimeTracker");
+        // Les 15 dernières minutes n'ont pas encore été apprises : la base est à jour, on y va.
+        LearnFromActivity(flush: true);
         _activity?.Dispose();
         try { _timer?.Flush(); } catch (Exception ex) { Logger.Error("OnExit/Flush", ex); }
         _hotkeys?.Dispose();

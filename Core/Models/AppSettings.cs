@@ -55,14 +55,27 @@ public class AppSettings
     /// </summary>
     public bool ActivityLearning { get; set; } = true;
 
+    /// <summary>
+    /// Proposer de changer de tâche quand les fenêtres ne ressemblent plus à la tâche en cours
+    /// (<c>ActivityShiftDetector</c>). Local ; sans effet si les suggestions sont coupées.
+    /// </summary>
+    public bool ActivityShiftDetection { get; set; } = true;
+
     // --- Assistant IA (optionnel, coupé par défaut) ---
 
     /// <summary>
     /// Autoriser l'envoi des <b>noms de tâches</b> à un modèle de langage, à la demande
-    /// (bouton dans « Gérer les tâches »). Jamais les heures, jamais les titres de fenêtres.
-    /// C'est la seule fonction qui fait sortir quelque chose du poste : coupée par défaut.
+    /// (boutons « Proposer avec l'IA »). Jamais les heures. Coupée par défaut.
     /// </summary>
     public bool AiEnabled { get; set; } = false;
+
+    /// <summary>
+    /// Laisser l'IA proposer des noms <b>automatiquement</b>, d'après des mots-clés des titres de
+    /// fenêtres (jamais un titre entier) : au changement détecté et à l'ouverture du sélecteur.
+    /// Décidé par l'utilisateur le 2026-09-29 ; interrupteur à part, coupé par défaut, parce que
+    /// ces mots peuvent contenir des noms de clients — ce n'est plus seulement des noms de tâches.
+    /// </summary>
+    public bool AiActivitySuggestions { get; set; } = false;
 
     /// <summary>« gemini », « openai » (et tout ce qui parle le même protocole : Mistral, Ollama…), « anthropic ».</summary>
     public string AiProvider { get; set; } = "gemini";
@@ -150,7 +163,9 @@ public class AppSettings
     public const string KeyWeeklyHoursGoal = "weekly_hours_goal";
     public const string KeyActivitySuggestions = "activity_suggestions";
     public const string KeyActivityLearning = "activity_learning";
+    public const string KeyActivityShiftDetection = "activity_shift_detection";
     public const string KeyAiEnabled = "ai_enabled";
+    public const string KeyAiActivitySuggestions = "ai_activity_suggestions";
     public const string KeyAiProvider = "ai_provider";
     public const string KeyAiApiKey = "ai_api_key";
     public const string KeyAiModel = "ai_model";

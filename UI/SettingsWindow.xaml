@@ -104,7 +104,12 @@
                 <CheckBox x:Name="ActivityCheck" Margin="0,0,0,4"
                           Content="Suggérer la tâche d'après les fenêtres utilisées"/>
                 <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
-                           Text="Compare les mots des titres de fenêtres au premier plan (« Orvane - mapping.xlsx ») aux mots des noms de tâches (« Config Orvane »). La tâche suggérée passe en tête du sélecteur avec sa raison, et le rappel le signale si elle contredit la tâche en cours. Rien ne bascule tout seul. Le relevé des fenêtres vit en mémoire (30 min) et disparaît avec l'application."/>
+                           Text="Compare les mots des titres de fenêtres au premier plan (« Orvane - mapping.xlsx ») aux mots des noms de tâches (« Config Orvane »). La tâche suggérée passe en tête du sélecteur avec sa raison. Rien ne bascule tout seul. Le relevé des fenêtres vit en mémoire (30 min) et disparaît avec l'application."/>
+
+                <CheckBox x:Name="ShiftCheck" Margin="0,0,0,4"
+                          Content="Proposer de changer de tâche quand mes fenêtres changent"/>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
+                           Text="Si pendant plusieurs minutes tes fenêtres ne ressemblent plus à la tâche en cours, une petite fenêtre en bas à droite propose de basculer — depuis l'heure où le changement a commencé — vers une tâche existante ou un nouveau nom, modifiable. Jamais pendant une réunion, une pause, ni juste après une bascule ou un réveil. Rien ne bascule sans ton clic."/>
 
                 <CheckBox x:Name="LearningCheck" Margin="0,0,0,4"
                           Content="Apprendre quelles fenêtres accompagnent chaque tâche"/>
@@ -123,7 +128,13 @@
                 <CheckBox x:Name="AiCheck" Margin="0,0,0,4"
                           Content="Autoriser l'assistant à proposer des regroupements de tâches"/>
                 <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
-                           Text="Bouton « Proposer avec l'IA » dans « Gérer les tâches ». Seuls les NOMS de tes tâches (et leur nombre d'entrées) sont envoyés au fournisseur choisi, uniquement quand tu cliques — jamais les heures, jamais les titres de fenêtres. C'est la seule fonction qui fait sortir quelque chose de ce poste ; avec un modèle local (Ollama, LM Studio) en « compatible OpenAI », rien n'en sort. Tu coches ensuite ce que tu appliques."/>
+                           Text="Bouton « Proposer avec l'IA » dans « Gérer les tâches » et dans « Noms à vérifier ». Seuls les NOMS de tes tâches (et leur nombre d'entrées) sont envoyés au fournisseur choisi, uniquement quand tu cliques — jamais les heures. Avec un modèle local (Ollama, LM Studio) en « compatible OpenAI », rien ne sort du poste. Tu coches ensuite ce que tu appliques."/>
+
+                <CheckBox x:Name="AiActivityCheck" Margin="0,0,0,4"
+                          IsEnabled="{Binding IsChecked, ElementName=AiCheck, Mode=OneWay}"
+                          Content="Laisser l'IA proposer des noms d'après mes fenêtres (automatique)"/>
+                <TextBlock Style="{StaticResource Hint}" Margin="0,0,0,12"
+                           Text="Quand un changement de tâche est détecté, et quand tu ouvres le sélecteur : envoie des MOTS-CLÉS tirés des titres de tes fenêtres (au plus 20 mots, jamais un titre entier), le nom des applications, le nom de la tâche en cours et ceux de tes tâches. Au plus un appel toutes les 5 minutes. Ce qui est parti est affiché à côté de chaque proposition. ⚠️ Ces mots peuvent contenir des noms de clients ou de collègues : vérifie la politique IA de ton entreprise, et sache qu'un niveau gratuit (Gemini AI Studio) autorise le fournisseur à réutiliser ces données."/>
 
                 <Grid Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>

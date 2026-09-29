@@ -45,8 +45,10 @@ public partial class SettingsWindow : Window
         GoalBox.Text = FormatHours(settings.GoalPerWeek ? settings.WeeklyHoursGoal : settings.DailyHoursGoal);
         ActivityCheck.IsChecked = settings.ActivitySuggestions;
         LearningCheck.IsChecked = settings.ActivityLearning;
+        ShiftCheck.IsChecked = settings.ActivityShiftDetection;
 
         AiCheck.IsChecked = settings.AiEnabled;
+        AiActivityCheck.IsChecked = settings.AiActivitySuggestions;
         AiProviderBox.ItemsSource = AiProviderFactory.Providers.Select(p => p.Label).ToList();
         AiProviderBox.SelectedIndex = Math.Max(0,
             AiProviderFactory.Providers.ToList().FindIndex(p => p.Id == settings.AiProvider));
@@ -277,7 +279,9 @@ public partial class SettingsWindow : Window
             _settings.GoalPerWeek = GoalPerWeek;
             _settings.ActivitySuggestions = ActivityCheck.IsChecked == true;
             _settings.ActivityLearning = LearningCheck.IsChecked == true;
+            _settings.ActivityShiftDetection = ShiftCheck.IsChecked == true;
             _settings.AiEnabled = AiCheck.IsChecked == true;
+            _settings.AiActivitySuggestions = AiActivityCheck.IsChecked == true;
             _settings.AiProvider = SelectedProvider;
             _settings.AiApiKey = AiKeyBox.Password.Trim();
             _settings.AiModel = AiModelBox.Text.Trim();
@@ -294,8 +298,8 @@ public partial class SettingsWindow : Window
             Logger.Info($"Réglages enregistrés : rappel={interval}min, absence={absence}min, son={_settings.ReminderSound}, " +
                         $"démarrageWindows={_settings.StartWithWindows}, " +
                         $"raccourcis={_settings.HotkeyTask}/{_settings.HotkeyEdit}/{_settings.HotkeyPause}, " +
-                        $"objectif={goalEntered}h/{(GoalPerWeek ? "semaine" : "jour")}, suggestions={_settings.ActivitySuggestions}/apprentissage={_settings.ActivityLearning}, " +
-                        $"IA={_settings.AiEnabled}/{_settings.AiProvider}/{_settings.AiModel}, " +
+                        $"objectif={goalEntered}h/{(GoalPerWeek ? "semaine" : "jour")}, suggestions={_settings.ActivitySuggestions}/apprentissage={_settings.ActivityLearning}/changement={_settings.ActivityShiftDetection}, " +
+                        $"IA={_settings.AiEnabled}/{_settings.AiProvider}/{_settings.AiModel}/activité={_settings.AiActivitySuggestions}, " +
                         $"réunions={_settings.MeetingDetection}/« {_settings.MeetingTaskName} », " +
                         $"agenda={_settings.OutlookCalendar}/question={_settings.OutlookAsk}");
             _saved = true;

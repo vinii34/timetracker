@@ -101,25 +101,27 @@ public partial class TaskManagerWindow : Window
     internal sealed record DuplicateRow(TaskRow Source, TaskRow Target, string Text);
 
     /// <summary>
-    /// Propose les fusions évidentes — coquille, accent, espace — sans rien envoyer nulle part
-    /// (<see cref="TaskSimilarity"/>). La tâche qui porte le moins d'entrées est fusionnée dans
-    /// l'autre, jamais la tâche en cours de suivi. Cinq paires au plus : au-delà, c'est le
+    /// Propose les fusions évidentes — coquille, accent, espace — sans rien envoyer nulle part.
+    /// Même règle que le bandeau « Noms à vérifier » (<see cref="NameReview"/>) : le nom sans
+    /// faute survit, même s'il porte moins d'entrées (« Onborading » 6 / « Onboarding » 3 sur les
+    /// vrais noms), et jamais la tâche en cours ne part. Cinq paires au plus : au-delà, c'est le
     /// filtre qui sert.
     /// </summary>
     private void LoadDuplicates()
     {
-        var byId = _allRows.ToDictionary(r => r.Id);
-        var pairs = TaskSimilarity.FindDuplicates(_allRows.Select(r => r.Task).ToList())
-            .Select(d =>
+        var byName = _allRows.GroupBy(r => r.Name, StringComparer.CurrentCultureIgnoreCase)
+                             .ToDictionary(g => g.Key, g => g.First(), StringComparer.CurrentCultureIgnoreCase);
+        var usage = _allRows.Select(r => new TaskUsage { Task = r.Task, EntryCount = r.EntryCount }).ToList();
+        var pairs = NameReview.Find(usage, _currentTaskId, _settings?.MeetingTaskName ?? TaskSimilarity.DefaultMeetingName,
+                                    new HashSet<string>())
+            .Where(i => i.Merge != null && byName.ContainsKey(i.Merge.From) && byName.ContainsKey(i.Merge.Into))
+            .Select(i =>
             {
-                var a = byId[d.A.Id];
-                var b = byId[d.B.Id];
-                var (source, target) = a.EntryCount <= b.EntryCount ? (a, b) : (b, a);
-                if (source.IsCurrent) (source, target) = (target, source);
+                var source = byName[i.Merge!.From];
+                var target = byName[i.Merge.Into];
                 return new DuplicateRow(source, target,
                     $"« {source.Name} » ({source.Entries}) ≈ « {target.Name} » ({target.Entries})");
             })
-            .Where(p => !p.Source.IsCurrent)
             .Take(5)
             .ToList();
 
@@ -399,40 +401,7 @@ public partial class TaskManagerWindow : Window
         var chosen = AiSuggestionsWindow.Show(this, provider.Name, proposal);
         if (chosen.Count == 0) return;
 
-        int applied = 0;
-        var skipped = new List<string>();
-        foreach (var row in chosen)
-        {
-            try
-            {
-                if (row.Merge is { } m)
-                {
-                    var source = _db.FindTaskByName(m.From);
-                    var target = _db.FindTaskByName(m.Into);
-                    if (source is null || target is null || source.Id == target.Id) { skipped.Add(m.From); continue; }
-                    if (source.Id == _currentTaskId) { skipped.Add($"{m.From} (tâche en cours)"); continue; }
-                    _db.MergeTasks(source.Id, target.Id);
-                    Logger.Info($"Tâches fusionnées (IA) : « {m.From} » → « {m.Into} ».");
-                    applied++;
-                }
-                else if (row.Rename is { } r)
-                {
-                    var task = _db.FindTaskByName(r.From);
-                    if (task is null) { skipped.Add(r.From); continue; }
-                    var clash = _db.FindTaskByName(r.To);
-                    if (clash != null && clash.Id != task.Id) { skipped.Add($"{r.From} → {r.To} (nom déjà pris)"); continue; }
-                    _db.UpdateTaskName(task.Id, r.To);
-                    Logger.Info($"Tâche renommée (IA) : « {r.From} » → « {r.To} ».");
-                    applied++;
-                }
-            }
-            catch (Exception ex)
-            {
-                Logger.Error("TaskManager.Ai/apply", ex);
-                skipped.Add(row.Title);
-            }
-        }
-
+        var (applied, skipped) = NameReview.Apply(_db, chosen.Select(r => (r.Merge, r.Rename)), _currentTaskId, "IA");
         if (applied > 0) Changed = true;
         Reload();
         var summary = $"{applied} proposition(s) appliquée(s).";

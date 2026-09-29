@@ -11,8 +11,9 @@ Ne demande pas à l'utilisateur de réexpliquer le projet : tout est dans ces de
 ## But du projet
 
 Application **Windows** de suivi du temps de travail **par tâche**, tournant en arrière-plan
-(icône system tray), **100 % locale par défaut** — seule l'assistant IA (opt-in, v1.6) envoie
-des noms de tâches, sur un clic. Finalité : produire
+(icône system tray), **100 % locale par défaut** — seul l'assistant IA (opt-in) envoie quelque
+chose : des noms de tâches sur un clic (v1.6), et, derrière un second interrupteur coupé par
+défaut, des mots-clés de fenêtres pour proposer des noms (v1.7). Finalité : produire
 des données exploitables pour **remplir une timesheet interne**. À terme : intégration Outlook
 et détection automatique des réunions.
 
@@ -32,6 +33,18 @@ Le 2026-08-09 aussi : **icône posée sur les 7 fenêtres** (elles affichaient u
 réveil, en modal, dans une fenêtre absente de la barre des tâches et d'Alt-Tab. Voir `HANDOFF.md`
 §8 : ⚠️ ne jamais faire un `ShowDialog()` sur une fenêtre que l'utilisateur ne peut pas retrouver,
 et ne rien déclencher tout seul au réveil de veille.
+
+🧪 **v1.7 packagée le 2026-09-29, en test chez l'utilisateur** (`%USERPROFILE%\TimeTracker-v1.7\`,
+lancée par lui le 29/09 ; retour arrière = relancer sa v1.6.2). Après dépouillement de la 4e
+collecte (2026-09-17 → 29) : les suggestions ne pouvaient pas marcher — **63 % de son temps
+part sur des tâches créées le jour même**, et le suggéreur ne reclassait que l'existant. La v1.7
+apporte, sur ses décisions explicites du 29/09 : **proposition de changement de tâche**
+(`ActivityShiftDetector` + `ActivityShiftWindow`, jamais de bascule sans clic), **« Tu voulais
+dire … ? »** à la création, bandeau **« Noms à vérifier »** (`NameReview`, doublons **mot à mot**),
+**apprentissage différé** d'après la base, **encart du rappel retiré**, et l'**IA qui propose des
+noms** d'après des mots-clés (`TaskSuggestionAssistant`, interrupteur à part coupé par défaut).
+**Lis `HANDOFF.md` §0, section « 4e collecte »** : décisions, ce qui n'a pas tourné en réel (seuils
+de détection, appel Gemini avec le nouveau prompt), lignes du journal à relire.
 
 ✅ **v1.6.2 packagée le 2026-09-17** (`%USERPROFILE%\TimeTracker-v1.6.2\`), vérifiée sur l'exe
 publié ; **Gemini vérifié par l'utilisateur** avec sa clé (« répond OK »). La v1.5 du même jour a
@@ -56,17 +69,21 @@ réunion**. **Lis `HANDOFF.md` §0** : ce qui a été fait et pourquoi, et ce qu
 tourné en conditions réelles. ⚠️ Ne jamais écraser un paquet existant : ce sont les seuls
 retours arrière sur les exécutables publiés.
 
-Depuis le 2026-09-27, le projet tourne sur un nouveau poste : le SDK .NET 8 y est installé
-normalement et `dotnet` est dans le PATH (le contournement `dotnet-shim` décrit en
-`HANDOFF.md` §5 ne concerne que l'ancien poste).
+Depuis le 2026-09-27, le projet tourne sur **le poste de travail de l'utilisateur** — celui où
+son TimeTracker tourne en permanence et où se trouve son **vrai relevé**. `dotnet` est dans le
+PATH (SDK 9, qui compile la cible net8 ; le contournement `dotnet-shim` de `HANDOFF.md` §5 ne
+concerne que l'ancien poste). Depuis la v1.7, `--selftest` / `--uitest` tournent **pendant** que
+son appli tourne (ils passent avant le mutex) et `--db=` ne touche plus au registre de
+démarrage. Pièges de ce poste : `HANDOFF.md` §8, en tête.
 
 ⚠️ **Le poste de l'utilisateur est un portable à 150 %** (~670 points de haut), le poste de dev a
 un grand écran à 100 %. Une fenêtre haute doit avoir un `ScrollViewer` **et**
 `WindowFit.LimitToWorkArea` — `--uitest` le vérifie. Détail en `HANDOFF.md` §8.
 
-**Prochain sujet** : relire la prochaine collecte sur les nouveautés de la v1.4 (elles n'ont
-tourné que contre un agenda scripté), puis l'**installeur** (étape 8) pour la version finale.
-Points ouverts en `HANDOFF.md` §0.
+**Prochain sujet** : **ses impressions sur la v1.7** (il a dit revenir après l'avoir testée), puis
+relire son `log.txt` sur les lignes listées en `HANDOFF.md` §0 (« À lire dans la prochaine
+collecte ») avant de toucher au moindre seuil. Ensuite l'**installeur** (étape 8). La v1.4 est
+validée en réel (4e collecte). Points ouverts en `HANDOFF.md` §0, « Ce qui reste à faire ».
 
 ✅ **Étape 4 (Outlook) livrée et éprouvée.** Lecture de l'agenda par **COM sur l'Outlook
 classique**, derrière `ICalendarSource`. L'agenda est une **troisième sonde** du détecteur : il
@@ -80,7 +97,7 @@ l'utilisateur le 2026-08-09 : `portal.azure.com` → Microsoft Entra ID répond 
 access ». Pas d'inscription d'application possible, donc pas de client ID, donc rien à tester.
 Ça ne rouvrira que si son service informatique déclare l'application pour lui.
 
-À faire ensuite : l'installeur (étape 8), puis relire la collecte suivante.
+À faire ensuite : retours sur la v1.7 et collecte suivante, puis l'installeur (étape 8).
 
 ## Contraintes à ne pas oublier
 
