@@ -1142,6 +1142,13 @@ capture WASAPI (le vrai problème venait de WinMM), normalisation audio, langue 
   mutex distinct pour `--db=`, non fait).
 - **Lancer un exe relance le démarrage avec Windows vers cet exe** (si le réglage est coché) :
   c'est ce qui fait qu'un paquet devient « l'installé ». Relancer l'ancien pour revenir.
+- **GitHub depuis ce poste** : git utilise l'identifiant enregistré **vwalas**, collaborateur du
+  dépôt `vinii34/timetracker` depuis le 2026-09-29 (avant, `push` → 403) ; `gh` est connecté en
+  **vinii34**, le propriétaire. **Aucune identité git n'est configurée** (`user.name` /
+  `user.email`) : les commits de la v1.7 ont été signés avec
+  `git -c user.name=vinii34 -c user.email=193139747+vinii34@users.noreply.github.com commit …`,
+  comme l'import initial, sans rien écrire dans sa configuration. Travail sur une branche + PR,
+  pas directement sur `main`.
 - **Sa clé Gemini est en clair dans `settings`** : ne jamais l'afficher, la copier, la journaliser
   ni s'en servir pour un test — c'est à lui de tester avec.
 - **Aucun titre de fenêtre n'est conservé** (ni base, ni journal) : impossible de rejouer la
