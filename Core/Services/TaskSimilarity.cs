@@ -82,10 +82,20 @@ public static class TaskSimilarity
     /// <summary>Un nom prêt à comparer : fait une fois par tâche, pas une fois par paire.</summary>
     private sealed record Prepared(string Normalized, List<string> Words, bool Meeting);
 
-    private static string[] MeetingWords(string meetingName) =>
-        Normalize(meetingName).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    private static string[][] MeetingWords(string meetingName) =>
+        MeetingPrefixes(meetingName).Select(p => p.Split(' ')).ToArray();
 
-    private static Prepared Prepare(string name, string[] meeting)
+    /// <summary>
+    /// Préfixes de réunion, normalisés : celui du réglage, et toujours « Réunion ». Le réglage se
+    /// change (le 2026-09-29, « Réunion » → « Meetting ») mais les tâches déjà nommées gardent
+    /// l'ancien préfixe : sans lui, « Réunion — sujet » n'était plus une réunion et la fenêtre de
+    /// changement l'a proposée deux fois comme tâche de travail.
+    /// </summary>
+    public static IReadOnlyList<string> MeetingPrefixes(string meetingName) =>
+        new[] { Normalize(meetingName), Normalize(DefaultMeetingName) }
+            .Where(p => p.Length > 0).Distinct(StringComparer.Ordinal).ToList();
+
+    private static Prepared Prepare(string name, string[][] meeting)
     {
         var normalized = Normalize(name);
         if (normalized.Length == 0) return new Prepared("", new List<string>(), false);
@@ -315,11 +325,15 @@ public static class TaskSimilarity
         (a.Length == b.Length + 1 && a[0] == 'e' && a.EndsWith(b, StringComparison.Ordinal))
         || (b.Length == a.Length + 1 && b[0] == 'e' && b.EndsWith(a, StringComparison.Ordinal));
 
-    private static (List<string> Words, bool Meeting) StripMeeting(string[] words, string[] meeting)
+    private static (List<string> Words, bool Meeting) StripMeeting(string[] words, string[][] prefixes)
     {
-        bool prefixed = meeting.Length > 0 && words.Length >= meeting.Length
-                        && meeting.Select((w, i) => words[i] == w).All(x => x);
-        return (prefixed ? words.Skip(meeting.Length).ToList() : words.ToList(), prefixed);
+        foreach (var meeting in prefixes)
+        {
+            bool prefixed = meeting.Length > 0 && words.Length >= meeting.Length
+                            && meeting.Select((w, i) => words[i] == w).All(x => x);
+            if (prefixed) return (words.Skip(meeting.Length).ToList(), true);
+        }
+        return (words.ToList(), false);
     }
 
     private static int FindUnused(List<string> words, bool[] used, Func<string, bool> match)

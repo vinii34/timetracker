@@ -7,6 +7,7 @@
         ResizeMode="NoResize"
         Topmost="True"
         ShowInTaskbar="False"
+        ShowActivated="False"
         Background="#FAFAFA">
     <StackPanel Margin="18">
         <TextBlock x:Name="QuestionText" Text="Toujours sur cette tâche ?"

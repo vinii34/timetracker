@@ -15,13 +15,38 @@ internal static class AiHttp
         using var response = await AiProviderFactory.Http.SendAsync(request, cancellation);
         var text = await response.Content.ReadAsStringAsync(cancellation);
         if (!response.IsSuccessStatusCode)
-        {
-            // Le corps d'erreur des trois fournisseurs est lisible : on en garde le début.
-            var excerpt = text.Length > 300 ? text[..300] + "…" : text;
-            throw new HttpRequestException($"HTTP {(int)response.StatusCode} {response.ReasonPhrase} — {excerpt}");
-        }
+            throw new HttpRequestException($"HTTP {(int)response.StatusCode} {response.ReasonPhrase} — {ErrorMessage(text)}",
+                                           null, response.StatusCode);
         return JsonDocument.Parse(text);
     }
+
+    /// <summary>
+    /// Message d'erreur sur une ligne. Les trois fournisseurs répondent
+    /// <c>{"error": {"message": "…"}}</c> ; le corps entier, JSON indenté compris, prenait sept
+    /// lignes du journal pour un 503 « high demand » (2026-09-29).
+    /// </summary>
+    internal static string ErrorMessage(string body)
+    {
+        string? message = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("error", out var error))
+                message = error.ValueKind == JsonValueKind.Object && error.TryGetProperty("message", out var m)
+                    ? m.GetString()
+                    : error.ValueKind == JsonValueKind.String ? error.GetString() : null;
+        }
+        catch (JsonException) { /* corps non JSON : on garde le texte brut */ }
+
+        var oneLine = string.Join(' ', (message ?? body).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        return oneLine.Length > 200 ? oneLine[..200] + "…" : oneLine;
+    }
+
+    /// <summary>Surcharge passagère (429, 500, 502, 503, 504) : un nouvel essai a du sens.</summary>
+    public static bool IsTransient(Exception ex) =>
+        ex is HttpRequestException { StatusCode: { } code }
+        && (int)code is 429 or 500 or 502 or 503 or 504;
 }
 
 /// <summary>API Gemini (AI Studio) : <c>models/{model}:generateContent</c>.</summary>

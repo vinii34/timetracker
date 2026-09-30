@@ -39,6 +39,7 @@ public partial class TaskManagerWindow : Window
     private readonly long? _currentTaskId;
     private readonly AppSettings? _settings;
     private List<TaskRow> _allRows = new();
+    private Dictionary<long, int> _learnedWords = new();
 
     /// <summary>Vrai si la bibliothèque a été modifiée (l'appelant rafraîchit ses vues).</summary>
     public bool Changed { get; private set; }
@@ -86,6 +87,7 @@ public partial class TaskManagerWindow : Window
             Total = u.Total > TimeSpan.Zero ? ExportService.FormatHm(u.Total) : "—",
             LastUsed = u.LastEntry?.ToString("dd/MM/yyyy") ?? "jamais"
         }).ToList();
+        _learnedWords = _db.CountTaskHints();
 
         ApplyFilter();
         LoadDuplicates();
@@ -198,6 +200,11 @@ public partial class TaskManagerWindow : Window
         MergeTargetBox.IsEnabled = has;
         MergeButton.IsEnabled = has;
         DeleteButton.IsEnabled = has;
+
+        int learned = row != null ? _learnedWords.GetValueOrDefault(row.Id) : 0;
+        ForgetButton.IsEnabled = learned > 0;
+        ForgetButton.Content = learned > 0 ? $"🧹 Oublier ses fenêtres ({learned} mots)"
+                             : row != null ? "🧹 Rien d'appris" : "🧹 Oublier ses fenêtres";
 
         if (row is null)
         {
@@ -354,6 +361,38 @@ public partial class TaskManagerWindow : Window
         {
             Logger.Error("TaskManager.Delete", ex);
             ShowError($"Suppression impossible : {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Oubli ciblé de ce qu'une tâche a appris des fenêtres. Pensé pour la tâche fourre-tout :
+    /// avant la v1.7, elle apprenait les sujets de mails de tous les clients et « ressemblait »
+    /// à tout. L'effacement général reste dans les Paramètres.
+    /// </summary>
+    private void Forget_Click(object sender, RoutedEventArgs e)
+    {
+        var row = SelectedRow;
+        if (row is null) return;
+        int learned = _learnedWords.GetValueOrDefault(row.Id);
+        if (learned == 0) return;
+
+        var answer = MessageBox.Show(this,
+            $"Oublier les {learned} mot(s) de fenêtres appris pour « {row.Name} » ?\n\n" +
+            "Elle réapprendra au fil de l'usage. Le temps pointé n'est pas touché.",
+            "Oublier ce qui a été appris", MessageBoxButton.YesNo, MessageBoxImage.Question);
+        if (answer != MessageBoxResult.Yes) return;
+
+        try
+        {
+            int removed = _db.ClearTaskHints(row.Id);
+            Logger.Info($"Apprentissage oublié pour « {row.Name} » : {removed} mot(s).");
+            Reload(row.Id);
+            ShowInfo($"{removed} mot(s) oublié(s) pour « {row.Name} ».");
+        }
+        catch (Exception ex)
+        {
+            Logger.Error("TaskManager.Forget", ex);
+            ShowError($"Effacement impossible : {ex.Message}");
         }
     }
 

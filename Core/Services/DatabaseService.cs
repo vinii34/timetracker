@@ -233,6 +233,25 @@ ORDER BY t.name COLLATE NOCASE ASC;";
         return list;
     }
 
+    /// <summary>
+    /// Tâches dont <b>toutes</b> les entrées sont des réunions détectées : des réunions, quel que
+    /// soit leur nom (renommées à la main, ou nommées avant un changement du préfixe). Une tâche
+    /// mixte n'en fait pas partie.
+    /// </summary>
+    public HashSet<long> GetMeetingOnlyTaskIds()
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+SELECT task_id FROM time_entries
+GROUP BY task_id
+HAVING SUM(CASE WHEN is_meeting = 1 THEN 1 ELSE 0 END) = COUNT(*);";
+        var ids = new HashSet<long>();
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) ids.Add(r.GetInt64(0));
+        return ids;
+    }
+
     public int CountEntriesForTask(long taskId)
     {
         using var conn = Open();
@@ -367,6 +386,31 @@ ON CONFLICT(task_id, word) DO UPDATE SET seconds = seconds + excluded.seconds;";
         using var cmd = conn.CreateCommand();
         cmd.CommandText = "DELETE FROM task_hints;";
         return cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Oublie ce qu'une seule tâche a appris — typiquement la tâche fourre-tout, qui apprend les
+    /// sujets de mails de tous les clients (419 mots au 29/09). Renvoie le nombre de mots effacés.
+    /// </summary>
+    public int ClearTaskHints(long taskId)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "DELETE FROM task_hints WHERE task_id = $id;";
+        cmd.Parameters.AddWithValue("$id", taskId);
+        return cmd.ExecuteNonQuery();
+    }
+
+    /// <summary>Nombre de mots appris par tâche (seules les tâches qui en ont figurent).</summary>
+    public Dictionary<long, int> CountTaskHints()
+    {
+        var result = new Dictionary<long, int>();
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT task_id, COUNT(*) FROM task_hints GROUP BY task_id;";
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) result[r.GetInt64(0)] = r.GetInt32(1);
+        return result;
     }
 
     private static List<TaskItem> ReadTasks(SqliteCommand cmd)

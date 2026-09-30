@@ -74,11 +74,12 @@ public partial class CalendarPromptWindow : Window
             },
             Describe(m))).ToList();
 
+        // Elle arrive en début de créneau, souvent pendant qu'il tape dans un chat : pas
+        // d'Activate() (voir WindowFit).
+        WindowFit.KeepBottomRight(this);
         Loaded += (_, _) =>
         {
-            PositionBottomRight();
             if (playSound) SystemSounds.Asterisk.Play();
-            Activate();
         };
     }
 
@@ -114,15 +115,6 @@ public partial class CalendarPromptWindow : Window
         var win = new CalendarPromptWindow(choice, playSound);
         win.Closed += (_, _) => answered(win._chosen);
         win.Show();
-    }
-
-    /// <summary>Coin bas-droit, borné à la zone de travail (même piège que ReminderPopup).</summary>
-    private void PositionBottomRight()
-    {
-        var area = SystemParameters.WorkArea;
-        double height = ActualHeight > 0 ? ActualHeight : 200;
-        Left = Math.Clamp(area.Right - Width - 12, area.Left, Math.Max(area.Left, area.Right - Width));
-        Top = Math.Clamp(area.Bottom - height - 12, area.Top, Math.Max(area.Top, area.Bottom - height));
     }
 
     private void Candidate_Click(object sender, RoutedEventArgs e)

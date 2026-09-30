@@ -266,18 +266,12 @@ public partial class App : Application
         _selectorOpen = true;
         try
         {
-            var tasks = BuildSelectorTasks();
-
-            // Les tâches que l'activité des fenêtres suggère passent en tête, avec leur raison.
+            // Les tâches que l'activité des fenêtres suggère sont marquées 💡, avec leur raison.
             var suggestions = CurrentSuggestions();
-            IReadOnlyDictionary<long, string>? reasons = null;
-            if (suggestions.Count > 0)
-            {
-                reasons = suggestions.ToDictionary(s => s.Task.Id, s => s.Reason);
-                tasks = suggestions.Select(s => s.Task)
-                                   .Concat(tasks.Where(t => !reasons.ContainsKey(t.Id)))
-                                   .Take(15).ToList();
-            }
+            var tasks = BuildSelectorTasks(suggestions);
+            IReadOnlyDictionary<long, string>? reasons = suggestions.Count > 0
+                ? suggestions.ToDictionary(s => s.Task.Id, s => s.Reason)
+                : null;
 
             var allTasks = _db.GetAllTasks();
             var vocabulary = TaskSimilarity.Vocabulary.Of(allTasks.Select(t => t.Name));
@@ -310,15 +304,33 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// Liste proposée dans le sélecteur : les favoris d'abord, puis les tâches récentes
-    /// qui n'y sont pas déjà. Les chiffres 1-9 couvrent donc en priorité les favoris.
+    /// Liste proposée dans le sélecteur : les favoris, puis <b>la tâche d'avant</b>, puis les
+    /// suggestions 💡, puis les autres tâches récentes. Les chiffres 1-9 couvrent donc en
+    /// priorité les favoris et l'aller-retour entre deux tâches.
+    ///
+    /// Mesuré les 29-30/09 (v1.7) : sur 6 choix dans la liste, 5 étaient la tâche d'avant —
+    /// toujours au rang 6, derrière deux 💡, deux ★ et la tâche en cours elle-même — et aucun
+    /// n'était une 💡. La tâche qui tourne n'a rien à faire dans la liste (on ne bascule pas
+    /// sur elle) ; en pause elle y reste, pour la reprendre. Une réunion ne prend pas la place
+    /// de la tâche d'avant : elle reste plus bas, parmi les récentes.
     /// </summary>
-    private IReadOnlyList<TaskItem> BuildSelectorTasks()
+    private IReadOnlyList<TaskItem> BuildSelectorTasks(IReadOnlyList<TaskSuggester.Suggestion>? suggestions = null)
     {
-        var favorites = _db.GetFavoriteTasks();
-        var known = favorites.Select(t => t.Id).ToHashSet();
-        var recent = _db.GetRecentTasks(10).Where(t => !known.Contains(t.Id));
-        return favorites.Concat(recent).Take(15).ToList();
+        long? running = _timer?.HasActiveTask == true ? _timer.CurrentTask?.Id : null;
+        var meetingOnly = _db.GetMeetingOnlyTaskIds();
+        var recent = _db.GetRecentTasks(12).Where(t => t.Id != running).ToList();
+        var previous = recent.FirstOrDefault(t => !meetingOnly.Contains(t.Id)
+                                                  && !NameReview.IsMeeting(t.Name, _settings.MeetingTaskName));
+
+        var list = new List<TaskItem>();
+        var known = new HashSet<long>();
+        void Add(TaskItem t) { if (t.Id != running && known.Add(t.Id)) list.Add(t); }
+
+        foreach (var t in _db.GetFavoriteTasks()) Add(t);
+        if (previous != null) Add(previous);
+        foreach (var s in suggestions ?? Array.Empty<TaskSuggester.Suggestion>()) Add(s.Task);
+        foreach (var t in recent) Add(t);
+        return list.Take(15).ToList();
     }
 
     /// <summary>
@@ -459,27 +471,44 @@ public partial class App : Application
     }
 
     /// <summary>Ce qu'on propose, décidé sans rien afficher (vérifiable par <c>--selftest</c>).</summary>
+    /// <param name="Resumed">La tâche existante proposée est une tâche dont les fenêtres reviennent.</param>
     private sealed record ShiftProposal(TaskItem Current, ActivityShiftDetector.Shift Shift, DateTime Since,
                                         TaskSuggester.Suggestion? Local, string? LocalName,
                                         (IAiProvider Provider, TaskSuggestionAssistant.Request Request)? Ai,
-                                        IReadOnlyList<TaskItem> Tasks);
+                                        IReadOnlyList<TaskItem> Tasks, bool Resumed = false);
 
     /// <summary>
-    /// Ce que le poste sait proposer seul — une tâche existante suggérée par les fenêtres (jamais
-    /// une réunion ni la tâche en cours), un nom tiré du titre — et de quoi demander mieux à l'IA
-    /// si l'utilisateur l'a autorisé. L'heure proposée ne remonte jamais avant l'entrée en cours.
+    /// Ce que le poste sait proposer seul — une tâche existante (jamais une réunion ni la tâche en
+    /// cours) : d'abord celle dont les fenêtres reviennent (<see cref="ActivityLearning.ResumedTask"/>),
+    /// sinon celle que suggèrent les mots ; un nom tiré du titre — et de quoi demander mieux à
+    /// l'IA si l'utilisateur l'a autorisé. L'heure proposée ne remonte jamais avant l'entrée en cours.
     /// </summary>
+    /// <param name="recent">Relevés en mémoire ; null = ceux du relevé d'activité (les tests fournissent les leurs).</param>
     private ShiftProposal BuildShiftProposal(TaskItem current, ActivityShiftDetector.Shift shift,
-                                             Dictionary<long, Dictionary<string, int>> hints)
+                                             Dictionary<long, Dictionary<string, int>> hints,
+                                             IReadOnlyList<ActivityProbe.Sample>? recent = null)
     {
-        _shiftDetector.Proposed(shift, DateTime.Now);
+        var now = DateTime.Now;
+        _shiftDetector.Proposed(shift, now);
         var tasks = _db.GetAllTasks();
-        var local = TaskSuggester.Suggest(tasks, shift.Samples, hints, max: 3)
-                                 .FirstOrDefault(s => s.Task.Id != current.Id
-                                                      && !NameReview.IsMeeting(s.Task.Name, _settings.MeetingTaskName));
+        var byId = tasks.ToDictionary(t => t.Id);
+        var meetingOnly = _db.GetMeetingOnlyTaskIds();
+        bool Proposable(TaskItem t) => t.Id != current.Id && !meetingOnly.Contains(t.Id)
+                                       && !NameReview.IsMeeting(t.Name, _settings.MeetingTaskName);
+
+        TaskSuggester.Suggestion? local = null;
+        recent ??= _activity?.Recent(ActivityProbe.Retention) ?? Array.Empty<ActivityProbe.Sample>();
+        var resumed = ActivityLearning.ResumedTask(shift.Samples, shift.Keywords, recent,
+            _db.GetEntriesOverlapping(now - ActivityProbe.Retention, now), current.Id,
+            id => !byId.TryGetValue(id, out var t) || !Proposable(t));
+        if (resumed != null)
+            local = new TaskSuggester.Suggestion(byId[resumed.TaskId], resumed.Evidence, double.MaxValue,
+                                                 $"mêmes fenêtres que sur cette tâche jusqu'à {resumed.LastSeen:HH:mm}");
+        local ??= TaskSuggester.Suggest(tasks, shift.Samples, hints, max: 3).FirstOrDefault(s => Proposable(s.Task));
         var localName = ActivityNaming.FromTitle(shift.DominantTitle, shift.Processes.FirstOrDefault() ?? "");
         var ai = ActivityAiRequest(current.Name, shift.Keywords, shift.Processes, fromSelector: false);
-        return new ShiftProposal(current, shift, ClampToCurrentEntry(shift.Since), local, localName, ai, tasks);
+        return new ShiftProposal(current, shift, ClampToCurrentEntry(shift.Since), local, localName, ai, tasks,
+                                 Resumed: resumed != null);
     }
 
     /// <summary>
@@ -491,7 +520,7 @@ public partial class App : Application
         // Le journal ne dit ni titre ni mot-clé : seulement la tâche en cours et la nature de la proposition.
         Logger.Info($"Changement d'activité probable sur « {p.Current.Name} » depuis {p.Since:HH:mm} " +
                     $"({Format(p.Shift.Evidence)}) — proposé : " +
-                    (p.Local != null ? $"tâche existante « {p.Local.Task.Name} »" : "pas de tâche existante") +
+                    (p.Local != null ? $"tâche existante « {p.Local.Task.Name} »{(p.Resumed ? " (reprise)" : "")}" : "pas de tâche existante") +
                     (p.LocalName != null ? ", nom tiré du titre" : "") +
                     (p.Ai != null ? ", IA interrogée" : "") + ".");
 
@@ -503,7 +532,7 @@ public partial class App : Application
         var window = new ActivityShiftWindow(p.Current.Name, p.Since, p.Shift.Evidence, p.Shift.DominantTitle,
             p.Shift.DominantTime, p.Local?.Task, p.Local?.Reason, p.LocalName,
             typed => NameReview.CheckNewName(typed, p.Tasks, _settings.MeetingTaskName, vocabulary),
-            _settings.ReminderSound);
+            _settings.ReminderSound, existingIsResumed: p.Resumed);
         window.Answered += answer => OnShiftAnswered(p.Current, p.Shift, p.Since, answer);
         _shiftWindow = window;
         window.Show();
@@ -596,8 +625,9 @@ public partial class App : Application
         try { provider = AiProviderFactory.Create(_settings); }
         catch (Exception ex) { Logger.Info($"IA : suggestion d'activité impossible — {ex.Message}"); return null; }
 
+        var meetingOnly = _db.GetMeetingOnlyTaskIds();
         var names = _db.GetAllTasks()
-                       .Where(t => !NameReview.IsMeeting(t.Name, _settings.MeetingTaskName))
+                       .Where(t => !meetingOnly.Contains(t.Id) && !NameReview.IsMeeting(t.Name, _settings.MeetingTaskName))
                        .OrderByDescending(t => t.LastUsed ?? DateTime.MinValue)
                        .Select(t => t.Name)
                        .Take(TaskSuggestionAssistant.MaxTaskNames)
@@ -642,7 +672,19 @@ public partial class App : Application
         try
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(45));
-            var answer = await TaskSuggestionAssistant.RunAsync(provider, request, _settings.MeetingTaskName, cts.Token);
+            TaskSuggestionAssistant.Answer answer;
+            try
+            {
+                answer = await TaskSuggestionAssistant.RunAsync(provider, request, _settings.MeetingTaskName, cts.Token);
+            }
+            catch (Exception first) when (AiHttp.IsTransient(first))
+            {
+                // Un 503 « high demand » de Gemini (29/09) passe en général quelques secondes après.
+                Logger.Info($"IA : {first.Message} — nouvel essai dans 3 s.");
+                await Task.Delay(TimeSpan.FromSeconds(3), cts.Token);
+                _activityAiCalls++;
+                answer = await TaskSuggestionAssistant.RunAsync(provider, request, _settings.MeetingTaskName, cts.Token);
+            }
             Logger.Info($"IA : suggestion d'activité ({(request.FromSelector ? "sélecteur" : "changement")}, " +
                         $"{request.Keywords.Count} mots-clés, {Math.Min(request.TaskNames.Count, TaskSuggestionAssistant.MaxTaskNames)} noms) → " +
                         (answer.Existing != null ? "tâche existante" : answer.NewName != null ? "nom nouveau" : "rien") +
@@ -791,8 +833,9 @@ public partial class App : Application
         QuickEdit = OpenQuickEdit,
         TogglePause = TogglePause,
         StopTracking = StopTracking,
-        ManageTasks = OpenTaskManager,
-        OpenSettings = OpenSettings,
+        // Une fusion, un renommage ou un préfixe de réunion changé : le compte du bandeau est à refaire.
+        ManageTasks = () => { OpenTaskManager(); _namesCountAt = DateTime.MinValue; },
+        OpenSettings = () => { OpenSettings(); _namesCountAt = DateTime.MinValue; },
         NamesToReview = CountNamesToReview,
         ReviewNames = () => { OpenNameReview(); _namesCountAt = DateTime.MinValue; }
     };
@@ -1701,7 +1744,8 @@ public partial class App : Application
             var duplicatesOk = CheckTaskSimilarity();
             var namesOk = CheckNameHygiene();
             var suggestOk = CheckTaskSuggester();
-            var shiftOk = CheckShiftDetector() && CheckShiftWiring();
+            var shiftOk = CheckShiftDetector() && CheckShiftWiring() && CheckShiftResume();
+            var selectorOk = CheckSelectorOrder();
             var learningOk = CheckActivityLearning();
             var aiOk = CheckAiAssistant();
             var activityAiOk = CheckActivityAi();
@@ -1756,7 +1800,8 @@ public partial class App : Application
             var hotkeyOk = Hotkey.TryParse("Ctrl+Alt+T", out var hk) && hk.ToString() == "Ctrl+Alt+T"
                            && TimeInput.TryParse("9h05", out var t) && t == new TimeSpan(9, 5, 0);
 
-            Logger.Info($"SELFTEST OK : recent={recent.Count}, entrées_jour={today.Count}, " +
+            // Le verdict en tête de ligne : il disait « OK » même avec un « doublons=False » (29/09).
+            var summary = $"recent={recent.Count}, entrées_jour={today.Count}, " +
                         $"entrées_semaine={week.Count}, csv={csvSize}o, xlsx={xlsxSize}o, " +
                         $"réglages={settingsOk}, raccourcis/heures={hotkeyOk}, " +
                         $"arrêt={stopOk}, favori={favoriteOk}, renommage={renameOk}, " +
@@ -1768,8 +1813,10 @@ public partial class App : Application
                         $"réunion_titre_posé={appliedOk}, agenda={calendarOk}, " +
                         $"enchaînements={sequencesOk}, absence={absenceOk}, " +
                         $"doublons={duplicatesOk}, noms={namesOk}, suggestions={suggestOk}, changement={shiftOk}, " +
+                        $"sélecteur={selectorOk}, " +
                         $"apprentissage={learningOk}, objectif={goalOk}, IA={aiOk}, IA_activité={activityAiOk}, " +
-                        $"titre_tronqué={shortenOk}");
+                        $"titre_tronqué={shortenOk}";
+            Logger.Info($"SELFTEST {(summary.Contains("=False") ? "ÉCHEC" : "OK")} : {summary}");
         }
         catch (Exception ex)
         {
@@ -2105,8 +2152,18 @@ public partial class App : Application
         var stored = NameReview.LoadDismissed(_db);
         bool dismissOk = stored.Count == 2 && stored.Contains("m:1:2") && stored.Contains("r:3:x");
 
-        Logger.Info($"SELFTEST noms : fautes={typosOk}, saisie={hintsOk}, bandeau={reviewOk}, refus={dismissOk}");
-        return typosOk && hintsOk && reviewOk && dismissOk;
+        // Préfixe changé dans les Paramètres (« Réunion » → « Meetting », 29/09) : les tâches déjà
+        // nommées restent des réunions, et le même sujet sous les deux préfixes est un doublon.
+        bool prefixOk = NameReview.IsMeeting("Réunion — Point Hebdo PRJ - Velmora", "Meetting")
+                        && NameReview.IsMeeting("Meetting — Point Hebdo PRJ - Velmora", "Meetting")
+                        && NameReview.IsMeeting("Réunion", "Meetting")
+                        && !NameReview.IsMeeting("Réunions clients Orvane", "Meetting")
+                        && !NameReview.IsMeeting("Config Orvane", "Meetting")
+                        && TaskSimilarity.IsDuplicate("Réunion — Point Hebdo PRJ - Velmora",
+                                                      "Meetting — Point Hebdo PRJ - Velmora", out _, "Meetting");
+
+        Logger.Info($"SELFTEST noms : fautes={typosOk}, saisie={hintsOk}, bandeau={reviewOk}, refus={dismissOk}, préfixe={prefixOk}");
+        return typosOk && hintsOk && reviewOk && dismissOk && prefixOk;
     }
 
     /// <summary>
@@ -2279,6 +2336,120 @@ public partial class App : Application
     }
 
     /// <summary>
+    /// Reprise d'une tâche récente (le cas du 29/09 à 17:26) : de retour sur les fenêtres de la
+    /// tâche quittée il y a un quart d'heure, c'est elle qui est proposée — pas une réunion qui
+    /// en porterait un mot, pas la tâche en cours. Une activité sans rapport ne désigne rien.
+    /// </summary>
+    private bool CheckShiftResume()
+    {
+        // Base à part : les entrées des autres vérifications couvrent la même demi-heure, alors
+        // qu'une vraie base n'a jamais deux entrées en même temps.
+        var previousDb = _db;
+        var previousTimer = _timer;
+        var path = Path.Combine(Path.GetTempPath(), $"timetracker_selftest_{Guid.NewGuid():N}.db");
+        _db = new DatabaseService(path);
+        _db.Initialize();
+        _timer = new TimerService(_db, 30);
+        try
+        {
+            var now = DateTime.Now;
+            var back = _db.GetOrCreateTask("Selftest reprise portail Dornac");
+            var meeting = _db.GetOrCreateTask("Selftest point Dornac hebdo");   // réunion par ses entrées, pas par son nom
+            var current = _db.GetOrCreateTask("Selftest reprise Orvane");
+            _timer.StartTask(back, now.AddMinutes(-26));
+            _timer.StartTask(meeting, now.AddMinutes(-16), isMeeting: true);
+            _timer.StartTask(current, now.AddMinutes(-13));
+
+            const string portal = "Portail Dornac - factures en attente - Microsoft Edge";
+            var recent = new List<ActivityProbe.Sample>();
+            void Add(string title, string process, int fromMinutes, int toMinutes)
+            {
+                for (var at = now.AddMinutes(-fromMinutes); at < now.AddMinutes(-toMinutes); at = at.AddSeconds(5))
+                    recent.Add(new ActivityProbe.Sample(at, process, title));
+            }
+            Add(portal, "msedge", 26, 16);
+            Add("Point Dornac hebdo | Microsoft Teams", "ms-teams", 16, 13);
+            Add("Orvane - mapping INVOIC.xlsx - Excel", "EXCEL", 13, 6);
+            Add(portal, "msedge", 6, 0);
+            var foreign = recent.Where(s => s.At >= now.AddMinutes(-6)).ToList();
+            var shift = new ActivityShiftDetector.Shift(now.AddMinutes(-6), TimeSpan.FromMinutes(6), portal,
+                TimeSpan.FromMinutes(6), new[] { "portail", "dornac", "factures", "attente" }, new[] { "msedge" }, foreign);
+
+            var p = BuildShiftProposal(current, shift, new Dictionary<long, Dictionary<string, int>>(), recent);
+            bool resumedOk = p.Resumed && p.Local?.Task.Id == back.Id;
+
+            // Un autre onglet du même portail (titre jamais vu) : les mots-clés vus assez longtemps suffisent.
+            var otherTab = foreign.Select(s => s with { Title = "Portail Dornac - relances clients - Microsoft Edge" }).ToList();
+            bool wordsOk = ActivityLearning.ResumedTask(otherTab, shift.Keywords, recent,
+                               _db.GetEntriesOverlapping(now.AddMinutes(-30), now), current.Id, _ => false)?.TaskId == back.Id;
+
+            // Seule la réunion a vu ces fenêtres, ou rien ne les a vues : pas de reprise.
+            var meetingOnly = _db.GetMeetingOnlyTaskIds();
+            var entries = _db.GetEntriesOverlapping(now.AddMinutes(-30), now);
+            bool noneOk = meetingOnly.Contains(meeting.Id) && !meetingOnly.Contains(back.Id)
+                          && ActivityLearning.ResumedTask(foreign, shift.Keywords, recent, entries, current.Id,
+                                                          id => id == back.Id) is null
+                          && ActivityLearning.ResumedTask(
+                                 foreign.Select(s => s with { Title = "Kestrio - commande 4512 - Outlook" }).ToList(),
+                                 new[] { "kestrio", "commande" }, recent, entries, current.Id, _ => false) is null;
+
+            _timer.Stop();
+            Logger.Info($"SELFTEST reprise : fenêtres={resumedOk}, mots={wordsOk}, aucune={noneOk}");
+            return resumedOk && wordsOk && noneOk;
+        }
+        finally
+        {
+            _timer = previousTimer;
+            _db = previousDb;
+            TryDeleteThrowawayDb(path);
+        }
+    }
+
+    /// <summary>
+    /// Ordre du sélecteur : favoris, tâche d'avant (pas une réunion), suggestions, récentes ; la
+    /// tâche qui tourne n'y est pas — sauf en pause, pour la reprendre.
+    /// </summary>
+    private bool CheckSelectorOrder()
+    {
+        var previousTimer = _timer;
+        _timer = new TimerService(_db, 30);
+        try
+        {
+            var now = DateTime.Now;
+            var before = _db.GetOrCreateTask("Selftest sélecteur tâche d'avant");
+            var meeting = _db.GetOrCreateTask("Selftest sélecteur point hebdo");
+            var suggested = _db.GetOrCreateTask("Selftest sélecteur suggérée");
+            var current = _db.GetOrCreateTask("Selftest sélecteur en cours");
+            _timer.StartTask(before, now.AddMinutes(-20));
+            _timer.StartTask(meeting, now.AddMinutes(-10), isMeeting: true);
+            _timer.StartTask(current, now.AddMinutes(-5));
+
+            var suggestions = new[]
+            {
+                new TaskSuggester.Suggestion(current, TimeSpan.FromMinutes(5), 2, "fenêtre"),
+                new TaskSuggester.Suggestion(suggested, TimeSpan.FromMinutes(4), 1, "fenêtre")
+            };
+            int favorites = _db.GetFavoriteTasks().Count;
+            var list = BuildSelectorTasks(suggestions).Select(t => t.Id).ToList();
+            bool orderOk = list.IndexOf(before.Id) == favorites
+                           && list.IndexOf(suggested.Id) == favorites + 1
+                           && !list.Contains(current.Id)
+                           && list.IndexOf(meeting.Id) > favorites + 1;
+
+            _timer.Pause();
+            bool pausedOk = BuildSelectorTasks(suggestions).Any(t => t.Id == current.Id);
+            _timer.Stop();
+
+            Logger.Info($"SELFTEST sélecteur : ordre={orderOk}, pause={pausedOk}");
+            return orderOk && pausedOk;
+        }
+        finally
+        {
+            _timer = previousTimer;
+        }
+    }
+
+    /// <summary>
     /// Apprentissage d'après la base : un relevé va à la tâche que l'entrée désigne après coup
     /// (bascule antidatée comprise), rien pendant une réunion ni hors de toute entrée (pause).
     /// </summary>
@@ -2362,8 +2533,17 @@ public partial class App : Application
         }, w => w == "commande");
         bool keywordsOk = keywords.SequenceEqual(new[] { "velmora" });
 
-        Logger.Info($"SELFTEST IA activité : prompt={promptOk}, lecture={parseOk}, envoyé={sentOk}, mots_clés={keywordsOk}");
-        return promptOk && parseOk && sentOk && keywordsOk;
+        // Erreur d'API : une ligne lisible (le 503 de Gemini prenait sept lignes du journal), et
+        // seules les surcharges passagères valent un nouvel essai.
+        const string busy = "{\n  \"error\": {\n    \"code\": 503,\n    \"message\": \"This model is currently experiencing high demand.\",\n    \"status\": \"UNAVAILABLE\"\n  }\n}\n";
+        bool errorOk = AiHttp.ErrorMessage(busy) == "This model is currently experiencing high demand."
+                       && AiHttp.ErrorMessage("Bad\ngateway") == "Bad gateway"
+                       && AiHttp.IsTransient(new System.Net.Http.HttpRequestException("x", null, System.Net.HttpStatusCode.ServiceUnavailable))
+                       && !AiHttp.IsTransient(new System.Net.Http.HttpRequestException("x", null, System.Net.HttpStatusCode.BadRequest))
+                       && !AiHttp.IsTransient(new FormatException());
+
+        Logger.Info($"SELFTEST IA activité : prompt={promptOk}, lecture={parseOk}, envoyé={sentOk}, mots_clés={keywordsOk}, erreur={errorOk}");
+        return promptOk && parseOk && sentOk && keywordsOk && errorOk;
     }
 
     /// <summary>
@@ -2483,7 +2663,13 @@ public partial class App : Application
         _db.MergeTasks(b.Id, a.Id);
         var merged = _db.GetTaskHints();
         bool mergedOk = merged[a.Id]["portail"] == 110 && !merged.ContainsKey(b.Id);
-        bool clearedOk = _db.ClearTaskHints() == 2 && _db.GetTaskHints().Count == 0;
+        // Oubli ciblé (« Gérer les tâches ») : une seule tâche, les autres gardent ce qu'elles savent.
+        var c = _db.GetOrCreateTask("Selftest apprentissage fourre-tout");
+        _db.AddTaskHints(c.Id, new Dictionary<string, int> { ["velmora"] = 60, ["kestrio"] = 60, ["orvane"] = 60 });
+        bool forgetOk = _db.CountTaskHints().GetValueOrDefault(c.Id) == 3
+                        && _db.ClearTaskHints(c.Id) == 3
+                        && !_db.CountTaskHints().ContainsKey(c.Id) && _db.CountTaskHints()[a.Id] == 2;
+        bool clearedOk = forgetOk && _db.ClearTaskHints() == 2 && _db.GetTaskHints().Count == 0;
 
         return promptOk && parseOk && factoryOk && refusesWithoutKey && settingsOk && hintsOk && mergedOk && clearedOk;
     }
@@ -2672,6 +2858,34 @@ public partial class App : Application
     /// </summary>
     private const double LaptopHeightBudget = 670;
 
+    /// <summary>Fenêtres qui s'ouvrent d'elles-mêmes, sans action de l'utilisateur.</summary>
+    private static readonly string[] AutomaticPopups = { "ReminderPopup", "CalendarPromptWindow", "ActivityShiftWindow" };
+
+    /// <summary>
+    /// Une fenêtre qui s'ouvre toute seule ne prend pas le focus (il tape peut-être ailleurs —
+    /// signalé le 2026-09-30), reste dans la zone de travail même quand son contenu grandit après
+    /// l'ouverture (la réponse de l'IA poussait les boutons de « Tu as changé de tâche ? » sous la
+    /// barre des tâches), et garde ses boutons visibles quand elle est plafonnée.
+    /// </summary>
+    private static void CheckAutomaticPopup(string name, Window window)
+    {
+        if (!AutomaticPopups.Any(p => name.StartsWith(p, StringComparison.Ordinal))) return;
+        if (window.ShowActivated)
+            throw new InvalidOperationException("ShowActivated : elle prendrait le focus à l'ouverture");
+
+        var area = SystemParameters.WorkArea;
+        if (window.Top < area.Top - 1 || window.Top + window.ActualHeight > area.Bottom + 1)
+            throw new InvalidOperationException(
+                $"hors de la zone de travail : {window.Top:F0} + {window.ActualHeight:F0} > {area.Bottom:F0}");
+
+        if (window.FindName("SwitchButton") is FrameworkElement button && window.Content is FrameworkElement content)
+        {
+            var bottom = button.TranslatePoint(new System.Windows.Point(0, button.ActualHeight), content).Y;
+            if (bottom > content.ActualHeight + 1)
+                throw new InvalidOperationException($"boutons hors de la fenêtre ({bottom:F0} > {content.ActualHeight:F0})");
+        }
+    }
+
     /// <summary>
     /// Une fenêtre plus haute que l'écran de l'utilisateur doit être défilable, sinon ses
     /// derniers réglages et ses boutons sont hors de portée — c'est ce qui est arrivé à la
@@ -2831,6 +3045,28 @@ public partial class App : Application
             shift.ShowAiPending("Gemini / gemini-3.5-flash-lite", uiSent);
             shift.ShowAiAnswer(null, "Commande Velmora en retard", "mail client cité");
         });
+        // Reprise (mêmes fenêtres qu'une tâche récente) : l'avis contraire de l'IA s'affiche sans la remplacer.
+        Render("ActivityShiftWindow/Reprise", () => new ActivityShiftWindow(task.Name, DateTime.Now.AddMinutes(-8),
+            TimeSpan.FromMinutes(7), "Velmora - suivi.xlsx - Excel", TimeSpan.FromMinutes(5), favorite,
+            "mêmes fenêtres que sur cette tâche jusqu'à 16:52", "Velmora suivi", null, playSound: false,
+            existingIsResumed: true), w =>
+        {
+            var shift = (ActivityShiftWindow)w;
+            shift.ShowAiPending("Gemini / gemini-3.5-flash-lite", uiSent);
+            shift.ShowAiAnswer(task, null, "mots-clés proches");
+        });
+        // La réponse de l'IA sur un écran bas : le texte défile, les boutons restent visibles.
+        Render("ActivityShiftWindow/petit écran", () =>
+        {
+            var w = ShiftWindow(favorite);
+            w.MaxHeight = 380;
+            return w;
+        }, w =>
+        {
+            var shift = (ActivityShiftWindow)w;
+            shift.ShowAiPending("Gemini / gemini-3.5-flash-lite", uiSent + " " + uiSent);
+            shift.ShowAiAnswer(null, "Commande Velmora en retard", "mail client cité");
+        });
         Render("ExportRangeWindow", () => new ExportRangeWindow(DateTime.Now.Date.AddDays(-30), DateTime.Now.Date));
         Render("TaskSelectorPopup/Décalage", () => new TaskSelectorPopup(recent, null, offerBackdate: true));
         Render("ReminderPopup", () => new ReminderPopup(task.Name, playSound: false));
@@ -2933,6 +3169,8 @@ public partial class App : Application
                 window.UpdateLayout();
                 Dispatcher.Invoke(() => { }, DispatcherPriority.ContextIdle);
                 if (snapshotDir != null) SaveSnapshot(window, snapshotDir, name);
+                // Avant CheckFitsOnLaptop, qui change la hauteur de la fenêtre pour la mesurer.
+                CheckAutomaticPopup(name, window);
                 results.Add($"{name}=OK{CheckFitsOnLaptop(window)}");
             }
             catch (Exception ex)

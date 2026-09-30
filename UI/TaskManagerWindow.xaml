@@ -83,12 +83,16 @@
                     <ComboBox x:Name="MergeTargetBox" Padding="6,4"/>
                 </DockPanel>
 
-                <StackPanel Orientation="Horizontal">
+                <WrapPanel>
                     <Button x:Name="FavoriteButton" Content="★ Ajouter aux favoris" Padding="12,5"
                             Margin="0,0,8,0" Click="ToggleFavorite_Click"/>
                     <Button x:Name="DeleteButton" Content="🗑 Supprimer" Padding="12,5"
-                            Click="Delete_Click"/>
-                </StackPanel>
+                            Margin="0,0,8,0" Click="Delete_Click"/>
+                    <!-- Oubli ciblé : la tâche fourre-tout apprend les mots de tout le monde. -->
+                    <Button x:Name="ForgetButton" Content="🧹 Oublier ses fenêtres" Padding="12,5"
+                            Click="Forget_Click"
+                            ToolTip="Efface les mots de fenêtres appris pour cette tâche seulement (suggestions, détection d'un changement). Le temps pointé n'est pas touché."/>
+                </WrapPanel>
 
                 <TextBlock x:Name="MessageText" TextWrapping="Wrap" Margin="0,10,0,0"
                            Visibility="Collapsed"/>

@@ -7,6 +7,7 @@
         ResizeMode="NoResize"
         Topmost="True"
         ShowInTaskbar="False"
+        ShowActivated="False"
         Background="#FAFAFA">
     <StackPanel Margin="18">
         <TextBlock x:Name="HeaderText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"/>
