@@ -76,10 +76,10 @@ public partial class DashboardWindow : Window
 
         Loaded += (_, _) =>
         {
-            LoadDay(); LoadWeek(); AdjustTaskColumn(); UpdateTrackerBar();
+            LoadDay(); LoadWeek(); AdjustTaskColumn(); UpdateTrackerBar(); UpdateNamesBanner();
             _refreshTimer.Start();
         };
-        Activated += (_, _) => { RefreshActiveTab(onlyIfLive: false); UpdateTrackerBar(); };
+        Activated += (_, _) => { RefreshActiveTab(onlyIfLive: false); UpdateTrackerBar(); UpdateNamesBanner(); };
         Closed += (_, _) => _refreshTimer.Stop();
         SizeChanged += (_, _) => AdjustTaskColumn();
     }
@@ -120,8 +120,23 @@ public partial class DashboardWindow : Window
             LoadDay();
             LoadWeek();
             UpdateTrackerBar();
+            UpdateNamesBanner();
         }
     }
+
+    /// <summary>Bandeau « N noms à vérifier » : masqué quand il n'y a rien.</summary>
+    private void UpdateNamesBanner()
+    {
+        int count;
+        try { count = _actions.NamesToReview(); }
+        catch (Exception ex) { Logger.Error("Dashboard.NamesToReview", ex); count = 0; }
+        NamesBanner.Visibility = count > 0 ? Visibility.Visible : Visibility.Collapsed;
+        NamesBannerText.Text = count == 1
+            ? "🔤 1 nom de tâche à vérifier (faute de frappe ou doublon probable)."
+            : $"🔤 {count} noms de tâches à vérifier (fautes de frappe, doublons probables).";
+    }
+
+    private void ReviewNames_Click(object sender, RoutedEventArgs e) => RunAction(_actions.ReviewNames);
 
     private void ChangeTask_Click(object sender, RoutedEventArgs e) => RunAction(_actions.ChangeTask);
 

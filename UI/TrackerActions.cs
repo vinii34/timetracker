@@ -17,4 +17,9 @@ public sealed class TrackerActions
     public Action StopTracking { get; init; } = () => { };
     public Action ManageTasks { get; init; } = () => { };
     public Action OpenSettings { get; init; } = () => { };
+
+    /// <summary>Nombre de noms de tâches à vérifier (fautes, doublons) ; zéro masque le bandeau.</summary>
+    public Func<int> NamesToReview { get; init; } = () => 0;
+
+    public Action ReviewNames { get; init; } = () => { };
 }

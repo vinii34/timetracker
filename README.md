@@ -2,14 +2,22 @@
 
 Suivi du temps de travail par tâche pour Windows.
 Tourne en arrière-plan (system tray), 100 % local par défaut — la seule fonction qui envoie
-quelque chose hors du poste (l'assistant IA) est désactivée par défaut, explicite, et n'envoie
-que des noms de tâches sur un clic.
+quelque chose hors du poste (l'assistant IA) est désactivée par défaut et explicite : des noms de
+tâches sur un clic, et, seulement si on coche une seconde case, des mots-clés de fenêtres (jamais
+un titre entier) pour proposer des noms de tâche.
 
 ## État d'avancement
 
 **v1.1** — application complète en saisie clavier : suivi, correction, restitution et export,
 plus la gestion de la bibliothèque de tâches et le pilotage depuis le tableau de bord.
 La reconnaissance vocale a été **abandonnée** (précision insuffisante) et retirée du code.
+
+**v1.7** (2026-09-29) — les suggestions refaites après deux semaines d'usage : TimeTracker
+**propose de lui-même de changer de tâche** quand les fenêtres ne ressemblent plus à la tâche en
+cours (tâche existante ou nom nouveau, « compter depuis 10:42 »), **« Tu voulais dire … ? »** à la
+création d'une tâche, un bandeau **« N noms à vérifier »** (fautes de frappe, doublons) dans le
+tableau de bord, des doublons comparés **mot à mot**, un apprentissage qui suit les corrections,
+et, en option, **l'IA qui propose des noms** d'après des mots-clés des fenêtres.
 
 **v1.6** (2026-09-17) — les suggestions **apprennent** quelles fenêtres accompagnent chaque tâche
 (mots de titres comptés par tâche, en base, sur le poste ; « Oublier » dans les Paramètres), et un
@@ -82,14 +90,22 @@ TimeTracker relève toutes les 5 s la fenêtre au premier plan et garde la derni
 titres (« Orvane - mapping.xlsx ») aux mots des noms de tâches (« Config Orvane ») ; seuls les mots
 qui désignent peu de tâches comptent (« Orvane » oui, « Config » ou « Réunion » non).
 - Dans le **sélecteur**, la tâche suggérée passe en tête avec 💡 et sa raison en infobulle.
-- Dans le **rappel**, un encart dit « D'après tes fenêtres, tu sembles plutôt sur … » quand la
-  suggestion contredit nettement la tâche en cours. Rien ne bascule tout seul.
-- **Apprentissage** : pendant qu'une tâche tourne, les mots des titres vus sont comptés pour elle
-  (table `task_hints` : tâche, mot, secondes — jamais un titre entier). Une fenêtre déjà vue dix
-  minutes avec « Kestrio Siren seul » la suggère même si son nom ne dit pas « Kestrio ».
-  La raison précise alors « fenêtre déjà vue avec cette tâche ».
-Désactivable dans Paramètres > « Suggestions de tâche » (suggestions et apprentissage séparément,
-plus « Oublier ce qui a été appris »).
+- **Changement de tâche probable** : si pendant plusieurs minutes les fenêtres ne ressemblent
+  plus à la tâche en cours, une petite fenêtre en bas à droite (non modale, dans la barre des
+  tâches, sans prendre le focus) demande « Tu as changé de tâche ? » : une tâche existante, ou un
+  nom nouveau pré-rempli et modifiable (tiré du titre, ou proposé par l'IA si elle est activée),
+  avec « Compter depuis 10:42 » et « Non, je reste ». Jamais en réunion, en pause, ni dans les
+  10 min qui suivent une bascule ou un réveil. **Rien ne bascule sans un clic.**
+- **« Tu voulais dire … ? »** : à la création d'une tâche, une faute de frappe évidente
+  (« Onborading ») ou une tâche existante à la faute près est signalée sous le champ ; `Tab`
+  corrige, `Entrée` garde le nom tapé.
+- **Apprentissage** : les mots des titres vus sont comptés pour la tâche que la base désigne un
+  quart d'heure plus tard — une bascule antidatée ou corrigée entre-temps est donc prise en compte
+  —, jamais pendant une réunion (table `task_hints` : tâche, mot, secondes — jamais un titre
+  entier). Une fenêtre déjà vue dix minutes avec « Kestrio Siren seul » la suggère même si son nom
+  ne dit pas « Kestrio ». La raison précise alors « fenêtre déjà vue avec cette tâche ».
+Désactivable dans Paramètres > « Suggestions de tâche » (suggestions, apprentissage et
+proposition de changement séparément, plus « Oublier ce qui a été appris »).
 
 ### Assistant IA (optionnel, désactivé par défaut)
 Paramètres > « Assistant IA » : fournisseur (**Gemini** avec une clé AI Studio, **compatible
@@ -99,6 +115,14 @@ tâches », **« ✨ Proposer avec l'IA… »** envoie les **noms** des tâches 
 rien d'autre : ni heures, ni titres de fenêtres) et affiche fusions et renommages proposés,
 à cocher. La tâche en cours n'est jamais fusionnée. Modèle Gemini par défaut :
 `gemini-3.5-flash-lite` (500 requêtes par jour sur le niveau gratuit).
+
+Seconde case, **coupée par défaut** : « Laisser l'IA proposer des noms d'après mes fenêtres ».
+Au changement de tâche détecté et à l'ouverture du sélecteur, elle envoie des **mots-clés** tirés
+des titres (au plus 20 mots, adresses e-mail retirées, jamais un titre entier), le nom des
+applications, celui de la tâche en cours et ceux des tâches (hors réunions). Au plus un appel
+toutes les 5 minutes ; ce qui est parti est affiché à côté de la proposition. ⚠️ Ces mots peuvent
+contenir des noms de clients : vérifier la politique IA de l'entreprise, et savoir qu'un niveau
+gratuit autorise le fournisseur à réutiliser les données.
 
 ### Détection de réunion
 
@@ -175,7 +199,9 @@ transmis n'a pas à contenir une semaine d'historique de navigation.
 Fenêtre dédiée (menu du tray, ou bouton **★ Tâches** du tableau de bord) pour nettoyer la
 liste proposée par le sélecteur :
 - **Doublons probables** signalés en tête (coquille, accent, majuscule, espace : « Conflig Flow 1
-  et 2 » ≈ « Config Flow1 et 2 ») avec un bouton **Fusionner** par paire. Calculé sur le poste.
+  et 2 » ≈ « Config Flow1 et 2 ») avec un bouton **Fusionner** par paire. Comparés mot à mot :
+  deux noms au même gabarit mais d'un client ou d'un sens différent ne sont pas des doublons. Le
+  nom sans faute est celui qui reste. Calculé sur le poste.
 - **Renommer** une tâche mal orthographiée — l'historique déjà enregistré suit.
 - **Fusionner** deux doublons (« Regardez Youtube » → « Regarder Youtube ») : les entrées sont
   rattachées à la tâche cible, aucun temps n'est perdu.
@@ -196,6 +222,10 @@ liste proposée par le sélecteur :
 - **Barre de suivi** en haut : tâche en cours et sa durée, puis *Changer de tâche*,
   *Corriger*, *Pause / Reprendre*, *Arrêter*, *★ Tâches*, *Paramètres* — plus besoin de
   repasser par l'icône du tray.
+- Bandeau **« N noms à vérifier »** quand des fautes de frappe ou des doublons probables sont
+  repérés : **Vérifier…** ouvre la liste à cocher (fusions et renommages), et « Proposer aussi
+  avec l'IA » y ajoute, sur un clic, les propositions de l'assistant. Une proposition cochée
+  qu'on décoche puis valide ne revient plus.
 - Onglet **Jour** : liste des entrées, total par tâche, total du jour, navigation
   jour par jour. Rafraîchissement en temps réel.
 - Onglet **Semaine** : tableau croisé tâche × jour, navigation de semaine en semaine.
@@ -224,7 +254,8 @@ d'export par défaut.
 
 ## Prérequis dev
 
-- .NET 8 SDK (`winget install Microsoft.DotNet.SDK.8`)
+- .NET 8 SDK ou plus récent (`winget install Microsoft.DotNet.SDK.8`) — un SDK 9 compile aussi
+  la cible `net8.0-windows`, à condition que le runtime Windows Desktop 8 soit présent.
 
 ## Build & run (dev)
 
@@ -244,9 +275,9 @@ L'exécutable de sortie : `bin\Debug\net8.0-windows\win-x64\TimeTracker.exe`.
 |--------|-------|
 | `--nostartpopup` | Démarre sans le popup de début de journée |
 | `--dashboard[=semaine]` | Ouvre directement le tableau de bord (onglet Jour ou Semaine) |
-| `--db=<chemin>` | Utilise une autre base (tests, sans toucher au relevé réel) |
-| `--selftest` | Exerce services, export et réglages sur une base jetable, journalise, puis quitte |
-| `--uitest[=<dossier>]` | Rend chaque fenêtre hors écran (détecte les erreurs XAML au rendu) ; avec un dossier, enregistre une capture PNG par fenêtre |
+| `--db=<chemin>` | Utilise une autre base (tests, sans toucher au relevé réel). Le démarrage avec Windows n'est alors jamais modifié |
+| `--selftest` | Exerce services, export et réglages sur une base jetable, journalise, puis quitte. Fonctionne même si TimeTracker tourne déjà |
+| `--uitest[=<dossier>]` | Rend chaque fenêtre hors écran (détecte les erreurs XAML au rendu) ; avec un dossier, enregistre une capture PNG par fenêtre. Fonctionne même si TimeTracker tourne déjà |
 | `--meetingprobe[=<fichier>]` | **Instantané** : relève micro, fenêtres et verdict de détection de réunion, puis **quitte** (aucun suivi du temps). Pour une vérification ponctuelle pendant une réunion. Fonctionne même si TimeTracker tourne déjà |
 | `--meetingtrace[=<fichier>]` | Suivi normal **plus** un journal de diagnostic continu (défaut : `%APPDATA%\TimeTracker\meetingtrace.log`). Une ligne à chaque changement de relevé, pas à chaque tour. C'est ce qu'il faut pour collecter plusieurs jours de données |
 | `--meetingobserve` | Les réunions sont détectées et journalisées mais **aucune bascule** n'a lieu : le relevé de temps n'est jamais modifié. À combiner avec `--meetingtrace` |
@@ -276,6 +307,14 @@ TimeTracker/
 │       ├── MeetingDetector    # décide du début et de la fin d'une réunion
 │       ├── MicrophoneProbe    # qui capte le micro maintenant (déclencheur)
 │       ├── MeetingWindowProbe # fenêtres de réunion (nomme, et conclut pour Zoom)
+│       ├── ActivityProbe      # fenêtre au premier plan toutes les 5 s, en mémoire (30 min)
+│       ├── TaskSuggester      # tâche existante suggérée d'après les mots des fenêtres
+│       ├── ActivityShiftDetector # changement de tâche probable (hystérésis, silences)
+│       ├── ActivityNaming     # nom de tâche tiré d'un titre de fenêtre (sur le poste)
+│       ├── ActivityLearning   # apprentissage différé d'après les entrées en base
+│       ├── TaskSimilarity     # doublons mot à mot, fautes de frappe (vocabulaire des noms)
+│       ├── NameReview         # « noms à vérifier » et « Tu voulais dire … ? »
+│       ├── Ai/                # fournisseurs IA, nettoyage des tâches, suggestion d'après l'activité
 │       ├── HotkeyService      # RegisterHotKey Win32, (ré)enregistrement à chaud
 │       ├── StartupService     # entrée registre démarrage Windows
 │       ├── ExportService      # CSV et XLSX (ClosedXML)
@@ -286,6 +325,8 @@ TimeTracker/
     ├── TrayIconManager        # NotifyIcon + menu contextuel
     ├── TaskSelectorPopup      # sélection / création de tâche (favoris, décalage 5/15 min)
     ├── ReminderPopup          # rappel périodique (suivi en cours ou en pause)
+    ├── ActivityShiftWindow    # « Tu as changé de tâche ? » (non modale, bas-droite)
+    ├── AiSuggestionsWindow    # propositions à cocher (IA, noms à vérifier)
     ├── QuickEditWindow        # correction à chaud (Ctrl+Alt+E)
     ├── EntryEditWindow        # édition d'une entrée terminée
     ├── TaskManagerWindow      # bibliothèque des tâches (renommer / fusionner / favoris)

@@ -480,6 +480,21 @@ ORDER BY e.started_at ASC;";
     }
 
     /// <summary>Entrée la plus récente, clôturée ou non (pour « supprimer la dernière »).</summary>
+    /// <summary>Entrées qui recouvrent [<paramref name="from"/>, <paramref name="to"/>[, l'entrée ouverte comprise.</summary>
+    public List<TimeEntry> GetEntriesOverlapping(DateTime from, DateTime to)
+    {
+        using var conn = Open();
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = @"
+SELECT e.id, e.task_id, e.started_at, e.ended_at, e.duration_seconds, e.is_meeting, e.notes, t.name
+FROM time_entries e JOIN tasks t ON t.id = e.task_id
+WHERE e.started_at < $to AND (e.ended_at IS NULL OR e.ended_at > $from)
+ORDER BY e.started_at ASC;";
+        cmd.Parameters.AddWithValue("$from", from);
+        cmd.Parameters.AddWithValue("$to", to);
+        return ReadEntries(cmd);
+    }
+
     public TimeEntry? GetLastEntry()
     {
         using var conn = Open();
@@ -688,9 +703,13 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value;";
             s.ActivitySuggestions = activity;
         if (bool.TryParse(GetSetting(AppSettings.KeyActivityLearning), out var learning))
             s.ActivityLearning = learning;
+        if (bool.TryParse(GetSetting(AppSettings.KeyActivityShiftDetection), out var shift))
+            s.ActivityShiftDetection = shift;
 
         if (bool.TryParse(GetSetting(AppSettings.KeyAiEnabled), out var ai))
             s.AiEnabled = ai;
+        if (bool.TryParse(GetSetting(AppSettings.KeyAiActivitySuggestions), out var aiActivity))
+            s.AiActivitySuggestions = aiActivity;
         var aiProvider = GetSetting(AppSettings.KeyAiProvider);
         if (!string.IsNullOrWhiteSpace(aiProvider)) s.AiProvider = aiProvider;
         s.AiApiKey = GetSetting(AppSettings.KeyAiApiKey) ?? "";
@@ -736,7 +755,9 @@ ON CONFLICT(key) DO UPDATE SET value = excluded.value;";
         SetSetting(AppSettings.KeyGoalPerWeek, s.GoalPerWeek.ToString());
         SetSetting(AppSettings.KeyActivitySuggestions, s.ActivitySuggestions.ToString());
         SetSetting(AppSettings.KeyActivityLearning, s.ActivityLearning.ToString());
+        SetSetting(AppSettings.KeyActivityShiftDetection, s.ActivityShiftDetection.ToString());
         SetSetting(AppSettings.KeyAiEnabled, s.AiEnabled.ToString());
+        SetSetting(AppSettings.KeyAiActivitySuggestions, s.AiActivitySuggestions.ToString());
         SetSetting(AppSettings.KeyAiProvider, s.AiProvider);
         SetSetting(AppSettings.KeyAiApiKey, s.AiApiKey);
         SetSetting(AppSettings.KeyAiModel, s.AiModel);

@@ -15,12 +15,6 @@
                    TextWrapping="Wrap" Foreground="#2D7DD2"/>
         <TextBlock x:Name="DetailText" FontSize="12" Foreground="#777"
                    Margin="0,0,0,16" TextWrapping="Wrap"/>
-        <Border x:Name="HintBorder" Background="#FFF8E1" BorderBrush="#F0D890" BorderThickness="1"
-                CornerRadius="4" Padding="8,6" Margin="0,-8,0,14"
-                Visibility="{Binding Visibility, ElementName=HintText, Mode=OneWay}">
-            <TextBlock x:Name="HintText" FontSize="12" Foreground="#6B5300" TextWrapping="Wrap"
-                       Visibility="Collapsed"/>
-        </Border>
 
         <!-- Suivi en cours -->
         <StackPanel x:Name="RunningButtons" Orientation="Horizontal" HorizontalAlignment="Right">

@@ -19,21 +19,14 @@ public partial class ReminderPopup : Window
 {
     private ReminderChoice _choice = ReminderChoice.Continue;
 
-    /// <param name="hint">
-    /// Ce que l'activité des fenêtres laisse penser, quand elle contredit la tâche en cours
-    /// (« tu sembles plutôt sur … »). Une information, jamais une bascule.
-    /// </param>
-    internal ReminderPopup(string taskName, bool playSound, TimeSpan? pausedFor = null, string? hint = null)
+    // L'encart « d'après tes fenêtres, tu sembles plutôt sur… » a été retiré le 2026-09-29 :
+    // affiché sur 33 rappels sur 46, suivi d'un changement 3 fois. La fenêtre de changement
+    // d'activité (ActivityShiftWindow) le remplace, au moment où le changement a lieu.
+    internal ReminderPopup(string taskName, bool playSound, TimeSpan? pausedFor = null)
     {
         InitializeComponent();
         Icon = AppIcon.Image;
         TaskNameText.Text = taskName;
-
-        if (!string.IsNullOrWhiteSpace(hint))
-        {
-            HintText.Text = hint;
-            HintText.Visibility = Visibility.Visible;
-        }
 
         if (pausedFor is TimeSpan paused)
         {
@@ -57,11 +50,12 @@ public partial class ReminderPopup : Window
     /// continue sa tâche, false s'il veut changer. Fermer la fenêtre = continuer (choix non
     /// destructif).
     /// </summary>
-    public static void Ask(string taskName, bool playSound, Action<bool> answered, string? hint = null)
+    public static ReminderPopup Ask(string taskName, bool playSound, Action<bool> answered)
     {
-        var win = new ReminderPopup(taskName, playSound, hint: hint);
+        var win = new ReminderPopup(taskName, playSound);
         win.Closed += (_, _) => answered(win._choice != ReminderChoice.Change);
         win.Show();
+        return win;
     }
 
     /// <summary>

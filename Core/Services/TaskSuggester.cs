@@ -21,8 +21,12 @@ namespace TimeTracker.Core.Services;
 ///   portail dont le titre ne cite jamais le client. Même garde-fou : un mot appris sur trop de
 ///   tâches ne désigne rien.
 ///
-/// Ce n'est qu'une <i>suggestion</i> : elle passe en tête du sélecteur avec sa raison, et le
-/// rappel la mentionne si elle contredit la tâche en cours. Elle ne bascule jamais toute seule.
+/// Ce n'est qu'une <i>suggestion</i> : elle passe en tête du sélecteur avec sa raison, et la
+/// fenêtre de changement d'activité la propose. Elle ne bascule jamais toute seule.
+///
+/// ⚠️ Par construction, elle ne sait que <b>reclasser les tâches existantes</b> : 63 % du temps
+/// de l'utilisateur hors réunion part sur des tâches créées le jour même (17 → 29/09). Un nom
+/// nouveau vient d'ailleurs — du titre (<see cref="ActivityNaming"/>) ou de l'IA.
 /// </summary>
 public static class TaskSuggester
 {
@@ -128,6 +132,36 @@ public static class TaskSuggester
         return result.OrderByDescending(s => s.Score)
                      .ThenByDescending(s => s.Task.LastUsed ?? DateTime.MinValue)
                      .Take(max).ToList();
+    }
+
+    /// <summary>
+    /// Mots rares des noms des <b>autres</b> tâches (au plus 15 % des noms, comme pour les
+    /// suggestions) : « velmora » nomme « Onboarding Velmora », « config » ne nomme rien.
+    /// </summary>
+    public static HashSet<string> RareNameWords(IReadOnlyList<TaskItem> tasks, long exceptTaskId)
+    {
+        var words = tasks.ToDictionary(t => t.Id, t => Words(t.Name));
+        int maxDf = Math.Max(1, (int)Math.Floor(tasks.Count * 0.15));
+        var df = words.Values.SelectMany(w => w).GroupBy(w => w).ToDictionary(g => g.Key, g => g.Count());
+        return words.Where(kv => kv.Key != exceptTaskId)
+                    .SelectMany(kv => kv.Value)
+                    .Where(w => df[w] <= maxDf)
+                    .ToHashSet(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Mots appris sur trop de tâches pour désigner quoi que ce soit (« microsoft », le nom de
+    /// l'employeur dans chaque titre Slack) : même seuil que les suggestions, 15 % des tâches.
+    /// </summary>
+    public static HashSet<string> CommonLearnedWords(IReadOnlyDictionary<long, Dictionary<string, int>> hints)
+    {
+        int maxDf = Math.Max(1, (int)Math.Floor(Math.Max(1, hints.Count) * 0.15));
+        return hints.Values
+                    .SelectMany(words => words.Where(w => w.Value >= MinLearnedSeconds).Select(w => w.Key))
+                    .GroupBy(w => w)
+                    .Where(g => g.Count() > maxDf)
+                    .Select(g => g.Key)
+                    .ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>
