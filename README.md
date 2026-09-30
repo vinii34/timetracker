@@ -12,6 +12,13 @@ un titre entier) pour proposer des noms de tâche.
 plus la gestion de la bibliothèque de tâches et le pilotage depuis le tableau de bord.
 La reconnaissance vocale a été **abandonnée** (précision insuffisante) et retirée du code.
 
+**v1.7.1** (2026-09-30) — premiers retours sur la v1.7 : les fenêtres qui s'ouvrent seules
+(rappel, question d'agenda, changement de tâche) **ne prennent plus le focus** ; la fenêtre de
+changement **ne déborde plus de l'écran** quand la réponse de l'IA arrive ; elle propose **la tâche
+dont les fenêtres reviennent** ; la **tâche d'avant** passe juste après les favoris dans le
+sélecteur ; les réunions restent reconnues quand on change leur préfixe ; oubli ciblé de ce qu'une
+tâche a appris.
+
 **v1.7** (2026-09-29) — les suggestions refaites après deux semaines d'usage : TimeTracker
 **propose de lui-même de changer de tâche** quand les fenêtres ne ressemblent plus à la tâche en
 cours (tâche existante ou nom nouveau, « compter depuis 10:42 »), **« Tu voulais dire … ? »** à la
@@ -65,7 +72,12 @@ d'après le journal de diagnostic de cette collecte. Voir `HANDOFF.md` §0 pour 
   corriger, tableau de bord, paramètres, quitter. Double-clic = tableau de bord.
 - **Raccourci global `Ctrl+Alt+T`** → popup de sélection de tâche.
 - **Popup de sélection** : saisie d'une nouvelle tâche (texte) ou choix dans la liste —
-  **favoris (★) en tête**, puis tâches récentes (clic, double-clic, `Entrée`, chiffres `1`-`9`).
+  **favoris (★) en tête**, puis **la tâche d'avant** (pour l'aller-retour entre deux tâches), les
+  suggestions 💡, puis les tâches récentes (clic, double-clic, `Entrée`, chiffres `1`-`9`). La
+  tâche en cours n'y figure pas, sauf en pause.
+- Les fenêtres qui s'ouvrent **d'elles-mêmes** (rappel, question d'agenda, changement de tâche)
+  apparaissent en bas à droite **sans prendre le focus** : on peut continuer à taper ailleurs,
+  et répondre d'un clic quand on veut.
 - **Timer** : durée écoulée affichée dans le tooltip de l'icône.
 - **Rappel** (défaut 30 min) : popup « Toujours sur cette tâche ? » + son système.
   - Répondre « Non, je change » propose de **décaler le début de 5 ou 15 min**, pour le cas
@@ -89,13 +101,16 @@ TimeTracker relève toutes les 5 s la fenêtre au premier plan et garde la derni
 **en mémoire seulement** — rien n'est écrit en base ni dans le journal. Il compare les mots des
 titres (« Orvane - mapping.xlsx ») aux mots des noms de tâches (« Config Orvane ») ; seuls les mots
 qui désignent peu de tâches comptent (« Orvane » oui, « Config » ou « Réunion » non).
-- Dans le **sélecteur**, la tâche suggérée passe en tête avec 💡 et sa raison en infobulle.
+- Dans le **sélecteur**, la tâche suggérée est marquée 💡, avec sa raison en infobulle.
 - **Changement de tâche probable** : si pendant plusieurs minutes les fenêtres ne ressemblent
   plus à la tâche en cours, une petite fenêtre en bas à droite (non modale, dans la barre des
   tâches, sans prendre le focus) demande « Tu as changé de tâche ? » : une tâche existante, ou un
   nom nouveau pré-rempli et modifiable (tiré du titre, ou proposé par l'IA si elle est activée),
-  avec « Compter depuis 10:42 » et « Non, je reste ». Jamais en réunion, en pause, ni dans les
-  10 min qui suivent une bascule ou un réveil. **Rien ne bascule sans un clic.**
+  avec « Compter depuis 10:42 » et « Non, je reste ». Si ces fenêtres ont déjà servi à une tâche
+  dans la dernière demi-heure, c'est **elle** qui est proposée (« mêmes fenêtres que sur cette
+  tâche jusqu'à 16:52 ») — un avis contraire de l'IA s'affiche à côté sans la remplacer. Jamais
+  une réunion, jamais en réunion, en pause, ni dans les 10 min qui suivent une bascule ou un
+  réveil. **Rien ne bascule sans un clic.**
 - **« Tu voulais dire … ? »** : à la création d'une tâche, une faute de frappe évidente
   (« Onborading ») ou une tâche existante à la faute près est signalée sous le champ ; `Tab`
   corrige, `Entrée` garde le nom tapé.
@@ -208,6 +223,9 @@ liste proposée par le sélecteur :
 - **Supprimer** une tâche jamais utilisée. Une tâche qui porte des heures n'est pas supprimable
   (l'historique serait amputé) : la fusion est proposée à la place.
 - **Favoris (★)** : les tâches courantes remontent en tête du sélecteur.
+- **Oublier ses fenêtres** : efface ce qu'une seule tâche a appris des titres de fenêtres — utile
+  pour une tâche fourre-tout (« e-mails ») qui finit par « ressembler » à tout. Le temps pointé
+  n'est pas touché ; l'oubli général reste dans les Paramètres.
 - Filtre par nom et vue « favoris seulement » ; nombre d'entrées, total et dernière
   utilisation affichés pour chaque tâche.
 

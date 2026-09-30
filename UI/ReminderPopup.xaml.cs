@@ -37,11 +37,15 @@ public partial class ReminderPopup : Window
             PausedButtons.Visibility = Visibility.Visible;
         }
 
+        // Bas-droit, jamais hors de l'écran : ce rappel se déclenche parfois juste après un
+        // réveil, quand l'affichage n'est pas stabilisé ; absent de la barre des tâches et
+        // d'Alt-Tab, hors écran il serait introuvable (c'est ce qui, avec un ShowDialog(),
+        // rendait le tableau de bord incliquable le lendemain matin — HANDOFF §8).
+        // Pas d'Activate() : voir WindowFit.
+        WindowFit.KeepBottomRight(this);
         Loaded += (_, _) =>
         {
-            PositionBottomRight();
             if (playSound) SystemSounds.Asterisk.Play();
-            Activate();
         };
     }
 
@@ -68,26 +72,6 @@ public partial class ReminderPopup : Window
         var win = new ReminderPopup(taskName, playSound, pausedFor);
         win.Closed += (_, _) => answered(win._choice);
         win.Show();
-    }
-
-    /// <summary>
-    /// Coin bas-droit, mais <b>jamais hors de l'écran</b>.
-    ///
-    /// Ce rappel se déclenche typiquement au réveil de la machine, quand la configuration
-    /// d'affichage n'est pas encore stabilisée : une position calculée à cet instant peut tomber
-    /// en dehors du bureau visible. La fenêtre est <c>ShowInTaskbar="False"</c> et
-    /// <c>WindowStyle="ToolWindow"</c>, donc absente de la barre des tâches <b>et</b> d'Alt-Tab :
-    /// hors écran, elle serait introuvable. C'est ce qui, combinée à un <c>ShowDialog()</c>,
-    /// rendait le tableau de bord incliquable le lendemain matin — chaque clic ne produisait
-    /// qu'un « ding » de fenêtre bloquée.
-    /// </summary>
-    private void PositionBottomRight()
-    {
-        var area = SystemParameters.WorkArea;
-        // Avec SizeToContent la hauteur peut ne pas être encore connue au Loaded.
-        double height = ActualHeight > 0 ? ActualHeight : 160;
-        Left = Math.Clamp(area.Right - Width - 12, area.Left, Math.Max(area.Left, area.Right - Width));
-        Top = Math.Clamp(area.Bottom - height - 12, area.Top, Math.Max(area.Top, area.Bottom - height));
     }
 
     private void Continue_Click(object sender, RoutedEventArgs e) => Answer(ReminderChoice.Continue);

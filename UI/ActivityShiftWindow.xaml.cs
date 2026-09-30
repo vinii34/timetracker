@@ -43,6 +43,10 @@ public partial class ActivityShiftWindow : Window
     private bool _userEdited;
     private bool _userChose;
     private string? _aiName;
+    private TaskItem? _aiExisting;
+    private string _aiWhy = "";
+    /// <summary>La tâche proposée est une reprise (mêmes fenêtres) : l'IA ne la remplace pas d'office.</summary>
+    private readonly bool _existingIsResumed;
     private NameReview.Hint? _hint;
     private ShiftAnswer? _answer;
 
@@ -55,11 +59,16 @@ public partial class ActivityShiftWindow : Window
     internal ActivityShiftWindow(string currentTask, DateTime since, TimeSpan evidence,
                                  string dominantTitle, TimeSpan dominantTime,
                                  TaskItem? existing, string? existingReason, string? localName,
-                                 Func<string, NameReview.Hint?>? checkName, bool playSound)
+                                 Func<string, NameReview.Hint?>? checkName, bool playSound,
+                                 bool existingIsResumed = false)
     {
+        _existingIsResumed = existing != null && existingIsResumed;
         InitializeComponent();
         Icon = AppIcon.Image;
         WindowFit.LimitToWorkArea(this);
+        // La réponse de l'IA arrive après l'ouverture et allonge la fenêtre : elle doit
+        // remonter, pas déborder sous la barre des tâches.
+        WindowFit.KeepBottomRight(this);
         _checkName = checkName;
         // Avant tout SetName : remplir le champ déclenche TextChanged, qui s'en sert.
         _hintDelay = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
@@ -80,7 +89,6 @@ public partial class ActivityShiftWindow : Window
 
         Loaded += (_, _) =>
         {
-            PositionBottomRight();
             if (playSound) SystemSounds.Asterisk.Play();
             _expiry.Start();
             UpdateHint();
@@ -114,7 +122,16 @@ public partial class ActivityShiftWindow : Window
         if (!IsLoaded) return;
         AiButton.IsEnabled = false;
         var reason = why.Length > 0 ? $" — {why}" : "";
-        if (existing != null)
+        if (existing != null && _existingIsResumed && _existing != null && existing.Id != _existing.Id)
+        {
+            // Les fenêtres reviennent d'une tâche de la dernière demi-heure : c'est un signal plus
+            // sûr que des mots-clés. L'avis de l'IA reste affiché, à reprendre d'un clic.
+            _aiExisting = existing;
+            _aiWhy = why;
+            AiButton.IsEnabled = true;
+            AiText.Text = $"✨ L'IA pense plutôt à « {existing.Name} »{reason} (clic pour la choisir)";
+        }
+        else if (existing != null)
         {
             SetExisting(existing, why, "IA");
             if (!_userChose) ExistingRadio.IsChecked = true;
@@ -124,7 +141,8 @@ public partial class ActivityShiftWindow : Window
         {
             _aiName = newName;
             if (!_userEdited) SetName(newName, "IA");
-            if (!_userChose) NewRadio.IsChecked = true;
+            // Une reprise reste cochée : le nom de l'IA est prêt dans le champ, s'il le préfère.
+            if (!_userChose && !_existingIsResumed) NewRadio.IsChecked = true;
             AiButton.IsEnabled = _userEdited;
             AiText.Text = $"✨ Nom proposé par l'IA : « {newName} »{reason}" + (_userEdited ? " (clic pour le reprendre)" : "");
         }
@@ -238,21 +256,20 @@ public partial class ActivityShiftWindow : Window
 
     private void Ai_Click(object sender, RoutedEventArgs e)
     {
+        _userChose = true;
+        if (_aiExisting != null)
+        {
+            SetExisting(_aiExisting, _aiWhy, "IA");
+            ExistingRadio.IsChecked = true;
+            AiButton.IsEnabled = false;
+            return;
+        }
         if (_aiName is null) return;
         SetName(_aiName, "IA");
         NewRadio.IsChecked = true;
     }
 
     // ------------------------------------------------------------------ Divers
-
-    /// <summary>Coin bas-droit, borné à la zone de travail (même piège que ReminderPopup).</summary>
-    private void PositionBottomRight()
-    {
-        var area = SystemParameters.WorkArea;
-        double height = ActualHeight > 0 ? ActualHeight : 320;
-        Left = Math.Clamp(area.Right - Width - 12, area.Left, Math.Max(area.Left, area.Right - Width));
-        Top = Math.Clamp(area.Bottom - height - 12, area.Top, Math.Max(area.Top, area.Bottom - height));
-    }
 
     private static string Minutes(TimeSpan t) =>
         t.TotalHours >= 1 ? $"{(int)t.TotalHours}h{t.Minutes:00}" : $"{Math.Max(1, (int)Math.Round(t.TotalMinutes))} min";

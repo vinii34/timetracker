@@ -2,9 +2,10 @@
 
 > Pour reprendre le projet dans une nouvelle session. Lis d'abord ce fichier,
 > puis `README.md`. `CLAUDE.md` (chargé automatiquement) en donne le résumé et pointe ici.
-> État au **2026-09-29** : **4e collecte dépouillée** (2026-09-17 → 29, première avec les
-> suggestions de la v1.6) et **suggestions refaites en v1.7**, packagée, **en test chez
-> l'utilisateur** depuis le 29/09 après-midi. Tout est en §0, section « 4e collecte ».
+> État au **2026-09-30** : **v1.7.1 packagée**, pas encore lancée par l'utilisateur — deux bugs
+> qu'il a signalés après une demi-journée de v1.7 (focus volé, boutons hors écran) et ce que son
+> `log.txt` du 29-30/09 a montré. Voir §0, « Premiers retours sur la v1.7 ». Avant : **4e collecte
+> dépouillée** (2026-09-17 → 29) et **suggestions refaites en v1.7**, section « 4e collecte ».
 > Le projet tourne désormais **sur le poste de travail** (celui du vrai relevé) : pièges propres
 > à ce poste en §8.
 
@@ -23,6 +24,91 @@ que les suggestions de tâche ne pouvaient pas marcher telles qu'elles étaient 
 | 2e collecte | `logs/TimeTracker-journaux-20260809-1516/` | 2026-08-03 → 07 | 13 |
 | 3e collecte | `logs/TimeTracker-journaux-20260917-0822/` | 2026-08-10 → 09-15 (20 jours) | 54 |
 | 4e collecte | `logs/TimeTracker-journaux-20260928-0911/` + `%APPDATA%` du 29/09 | 2026-09-17 → 29 (9 jours) | 19 |
+
+### Premiers retours sur la v1.7 (2026-09-29 14:30 → 09-30 08:31) — v1.7.1
+
+Lu **directement** dans `%APPDATA%\TimeTracker\log.txt` (lignes 1427 → 1680 ; ignorer les blocs
+`SELFTEST` / `UITEST`) et sur une copie de la base (`.db` + `-wal` + `-shm`) dans le dossier
+temporaire de session. Pas besoin de script d'extraction sur ce poste : l'agent lit le journal.
+
+**Signalé par l'utilisateur le 30/09 :**
+
+1. **Boutons hors écran** sur « Tu as changé de tâche ? » quand l'IA a répondu. Cause : la fenêtre
+   (`SizeToContent="Height"`) n'était placée qu'au `Loaded` ; « ✨ … réfléchit » puis « ce qui est
+   parti » l'allongeaient ensuite **vers le bas**, sous la barre des tâches.
+2. **Le focus volé** : « si je suis en train d'écrire quelque part ça me fait perdre le focus ».
+   `ReminderPopup` et `CalendarPromptWindow` appelaient `Activate()` au `Loaded` (l'`ActivityShiftWindow`
+   était déjà `ShowActivated="False"`). Risque aggravant : une `Entrée` tapée pour son propre texte
+   répondait au bouton par défaut (« Oui, je continue »).
+
+**Vu dans le journal :**
+
+3. **Le préfixe de réunion a changé** : `Réglages enregistrés … réunions=True/« Meetting »` le
+   29/09 14:46 (faute de frappe probable, à lui de dire). `NameReview.IsMeeting` ne connaissait que
+   le préfixe du réglage : les 62 tâches « Réunion — … » sont redevenues des tâches de travail, et
+   la fenêtre de changement a proposé **deux fois** « Réunion — Suivi projet e-facturation … » (deux
+   refus). Aucune tâche « Meetting — … » n'existe encore (aucune réunion détectée depuis).
+4. **Le changement du 29/09 à 17:26 était juste, la proposition fausse.** Détecté « depuis 17:21 »
+   sur « Config … », proposé : la réunion ci-dessus (IA : « rien ») → refusé. À 17:37 il rebascule
+   à la main sur la tâche **quittée à 17:08**, et antidate à 17:22. Le détecteur a vu le bon
+   instant ; le suggéreur ne pouvait pas connaître une tâche née l'après-midi même.
+5. **Sélecteur : 5 choix sur 6 au rang 6, tous « la tâche d'avant »** ; aucun 💡 choisi. Le rang 6,
+   c'est deux 💡 (`max: 2`), deux ★, puis **la tâche en cours elle-même** (rang 5).
+6. IA d'après les fenêtres **cochée par lui** le 29/09 14:39 : 8 appels en deux demi-journées,
+   1,0 à 1,2 s en général, deux à 15-17 s, **un 503 « high demand »** — journalisé sur sept lignes
+   (le corps JSON indenté). Le 30/09 08:30, une proposition acceptée d'après l'IA (« tâche existante,
+   IA »). « Noms à vérifier » : 30 + 17 + 7 appliqués le 29/09, dont les fusions IA.
+7. `SELFTEST OK … doublons=False` le 29/09 14:52 : la ligne disait **OK** avec un test en échec
+   (probablement une étape intermédiaire de la session v1.7 — repassé vert une minute après).
+
+**Ce qui a été fait (v1.7.1) :**
+
+- **`WindowFit.KeepBottomRight`** (rappel, agenda, changement) : bas-droit **à chaque changement de
+  hauteur**, bas calé sur la zone de travail ; déplacée à la main, elle n'est plus que bornée à
+  l'écran. Dans `ActivityShiftWindow`, les boutons sont **hors du `ScrollViewer`** (docké en bas) :
+  c'est le texte qui défile. `SentText` passe sous la ligne IA.
+- **`ShowActivated="False"`**, plus aucun `Activate()`, sur les trois fenêtres qui s'ouvrent
+  seules. `TaskSelectorPopup` et les fenêtres ouvertes par un clic gardent le leur.
+- **`TaskSimilarity.MeetingPrefixes`** : préfixe du réglage **et** « Réunion », pour `IsMeeting`,
+  les doublons et le « Tu voulais dire ». Plus **`DatabaseService.GetMeetingOnlyTaskIds`** (toutes
+  les entrées `is_meeting`, 55 tâches dans sa base, dont 5 sans le préfixe) : jamais proposées par la
+  fenêtre de changement ni envoyées à l'IA comme noms. Le nom qui **survit** à une fusion reste
+  celui du préfixe **du réglage** (la prochaine réunion recréerait sinon le doublon).
+- **`ActivityLearning.ResumedTask`** : quand les fenêtres étrangères ont été vues (titre identique,
+  ou mot-clé vu ≥ 30 s) pendant une entrée d'une **autre tâche de la dernière demi-heure** (en
+  mémoire, `ActivityProbe.Retention`), c'est elle qui est proposée — la moitié des fenêtres au
+  moins, la plus récente à égalité, jamais une réunion ni la tâche en cours. Journal :
+  `proposé : tâche existante « … » (reprise)`. Dans la fenêtre, une reprise **reste cochée** : l'avis
+  contraire de l'IA s'affiche (« L'IA pense plutôt à … — clic pour la choisir »), son nom nouveau
+  est prêt dans le champ.
+- **Sélecteur** (`BuildSelectorTasks`) : ★, **tâche d'avant** (la plus récente hors réunion),
+  💡, récentes ; la tâche qui tourne n'y est plus (en pause, si).
+- **IA** : erreur sur une ligne (`AiHttp.ErrorMessage`, `error.message` des trois fournisseurs) ;
+  **un nouvel essai après 3 s** sur 429/5xx (`AiHttp.IsTransient`), compté dans le plafond du jour.
+- **« Gérer les tâches » → « 🧹 Oublier ses fenêtres (N mots) »** : oubli ciblé d'une tâche
+  (`ClearTaskHints(taskId)`, `CountTaskHints`), pour la tâche fourre-tout — **proposé, pas
+  appliqué** : c'est à lui de cliquer.
+- Compteur du bandeau « Noms à vérifier » remis à zéro après « Gérer les tâches » et Paramètres.
+- La ligne `SELFTEST` porte le verdict réel (`ÉCHEC` dès qu'un `=False`).
+
+Couvert par `--selftest` : `noms` (+ `préfixe`), `reprise` (`CheckShiftResume` : fenêtres, mots,
+aucune — sur **sa propre base jetable**, les entrées des autres vérifications couvrant la même
+demi-heure), `sélecteur` (`CheckSelectorOrder` : ordre, pause), `IA activité` (+ `erreur`),
+`task_hints` (+ oubli ciblé). `--uitest` : `ActivityShiftWindow/Reprise` et `/petit écran`, et
+**`CheckAutomaticPopup`** — pour les trois fenêtres automatiques : `ShowActivated` faux, dans la
+zone de travail **après** l'arrivée de l'IA, boutons visibles. Vérifié par mutation : sans le
+recalage sur `SizeChanged`, 4 cas `ActivityShiftWindow` échouent ; avec `ShowActivated="True"`
+sur le rappel, ses 2 cas échouent.
+
+**Paquet v1.7.1** : `%USERPROFILE%\TimeTracker-v1.7.1\TimeTracker.exe` (72 Mo), `--selftest` et
+`--uitest` verts **sur l'exe publié**. **Pas lancé** : c'est à lui de quitter la v1.7 et de lancer
+celle-ci (le démarrage avec Windows suivra). Retour arrière : relancer la v1.7.
+
+⚠️ **À lire dans la prochaine collecte**, en plus de la liste de la v1.7 plus bas : la part de
+`(reprise)` dans les propositions et combien sont acceptées ; le rang choisi dans le sélecteur
+(la tâche d'avant devrait être au rang ★+1, soit 3 chez lui) ; les `nouvel essai dans 3 s` et
+leur issue. Et **lui demander** si « Meetting » est voulu (sinon : « Meeting » ou « Réunion » dans
+Paramètres ; rien n'est à rattraper en base tant qu'aucune réunion n'a été nommée avec).
 
 ### 4e collecte (2026-09-17 → 29, dépouillée le 2026-09-29) — les suggestions refaites (v1.7)
 
@@ -697,29 +783,31 @@ des fenêtres en base, assistant IA multi-fournisseur (coupé par défaut). Voir
 ou par semaine (retour immédiat de l'utilisateur), Gemini vérifié par lui avec sa clé.
 
 **v1.7 packagée le 2026-09-29** (`%USERPROFILE%\TimeTracker-v1.7\`), **en test chez
-l'utilisateur** : voir « 4e collecte » plus haut.
+l'utilisateur** : voir « 4e collecte » plus haut. **v1.7.1 packagée le 2026-09-30**
+(`%USERPROFILE%\TimeTracker-v1.7.1\`), à lancer par lui : voir « Premiers retours sur la v1.7 ».
 
-Ensuite, par ordre de priorité (mis à jour le 2026-09-29) :
+Ensuite, par ordre de priorité (mis à jour le 2026-09-30) :
 
-0. **Recueillir ses impressions sur la v1.7** — il a dit qu'il revenait après l'avoir testée —
-   puis **relire son `log.txt`** sur les lignes listées dans « À lire dans la prochaine
-   collecte ». Ne rien régler à l'aveugle : les seuils de la détection n'ont jamais vu de vraies
-   fenêtres. S'il faut des données plus fines (quelles fenêtres ont déclenché), lui **proposer**
-   une collecte d'activité opt-in, locale, sur le modèle de `--meetingtrace` — pas la décider :
-   aujourd'hui aucun titre n'est conservé, par principe.
+0. **Qu'il lance la v1.7.1**, puis **relire son `log.txt`** sur les lignes listées dans « À lire
+   dans la prochaine collecte » (v1.7 et v1.7.1). Ne rien régler à l'aveugle : les seuils de la
+   détection n'ont vu qu'une demi-journée de vraies fenêtres (4 propositions : 1 acceptée, 3
+   refusées dont 2 à cause du préfixe de réunion). S'il faut des données plus fines (quelles
+   fenêtres ont déclenché), lui **proposer** une collecte d'activité opt-in, locale, sur le modèle
+   de `--meetingtrace` — pas la décider : aujourd'hui aucun titre n'est conservé, par principe.
 1. **L'appris pollué n'a pas été effacé.** La tâche fourre-tout garde ses 419 mots ; les
-   nouvelles règles de la détection les neutralisent en partie, pas `TaskSuggester`. Lui
-   proposer « Oublier ce qui a été appris » (Paramètres) ou un oubli ciblé de cette seule tâche
-   (à écrire), et lui laisser le choix.
+   nouvelles règles de la détection les neutralisent en partie, pas `TaskSuggester`. Depuis la
+   v1.7.1, l'oubli ciblé existe (« Gérer les tâches » → « 🧹 Oublier ses fenêtres ») : **le lui
+   signaler**, lui laisser le choix. « Meetting » dans les Paramètres : lui demander si c'est voulu.
 2. **Les « réunions toute la journée »** des 23 et 24/09 (voir plus haut) : attendre que ça se
    reproduise avec `--meetingtrace` pour savoir qui tient le micro.
 3. **S'il coche l'IA d'après les fenêtres** : vérifier dans le journal que les appels passent
    (`IA : suggestion d'activité … →`), leur durée, et que le nombre par jour reste raisonnable.
    Les fournisseurs OpenAI-compatible et Anthropic restent écrits de mémoire, non testés.
-4. Petits points connus, non faits : le compteur du bandeau n'est pas recalculé après « Gérer
-   les tâches » (jusqu'à 1 min de décalage) ; un mutex distinct pour `--db=` permettrait
-   d'explorer l'UI à côté de sa vraie instance (aujourd'hui : « déjà en cours d'exécution ») ;
-   pondérer l'appris par la récence (§7).
+4. Petits points connus, non faits : un mutex distinct pour `--db=` permettrait d'explorer l'UI à
+   côté de sa vraie instance (aujourd'hui : « déjà en cours d'exécution » — ⚠️ la seconde instance
+   ferait aussi tourner détection de réunion, agenda et fenêtre de changement : deux questions à
+   l'écran pour une réunion, à couper en mode `--db=`) ; pondérer l'appris par la récence (§7).
+   Le compteur du bandeau est recalculé depuis la v1.7.1.
 5. Étape 8 (installeur) — voir §7. C'est ce qui reste pour une « version finale » : un
    raccourci menu Démarrer, ajout/suppression de programmes, et la question SmartScreen.
 6. Cosmétique : la durée annoncée dans la bulle de fin de réunion après une pause.
@@ -1174,6 +1262,25 @@ capture WASAPI (le vrai problème venait de WinMM), normalisation audio, langue 
   propose au moment où l'utilisateur répond (la tâche proposée a pu être fusionnée entre-temps).
 - **Un rappel non modal peut rester ouvert des heures** : ne pas en faire une condition de silence
   pour autre chose.
+
+**Leçons de la v1.7.1** :
+
+- ⚠️ **Une fenêtre qui s'ouvre d'elle-même ne prend jamais le focus** : `ShowActivated="False"`,
+  aucun `Activate()`. Il est souvent en train de taper (un chat, un mail) ; le focus volé coupe sa
+  saisie, et une `Entrée` destinée à son texte répond au bouton `IsDefault` à sa place.
+  `--uitest` le vérifie (`CheckAutomaticPopup`) — toute nouvelle fenêtre automatique doit être
+  ajoutée à `AutomaticPopups`.
+- ⚠️ **Une fenêtre en `SizeToContent` grandit vers le bas** : placée une fois au `Loaded`, elle
+  déborde dès qu'un contenu arrive après coup (réponse de l'IA). `WindowFit.KeepBottomRight` la
+  recale à chaque changement de hauteur ; et des boutons d'action se mettent **hors** du
+  `ScrollViewer`.
+- **Un réglage qui sert de préfixe change** : ce qui a été nommé avec l'ancien reste en base.
+  Reconnaître une réunion par ses entrées (`is_meeting`) et par tous les préfixes connus, jamais
+  par le seul réglage courant.
+- **La tâche d'avant est la meilleure suggestion** quand il fait des allers-retours — ni les mots
+  appris ni l'IA ne la voient si elle est née le jour même ; la demi-heure en mémoire, si.
+- **Un test ajouté doit pouvoir échouer** : les vérifications de la v1.7.1 ont été passées par
+  mutation (défaut réintroduit → `ÉCHEC`). Et un résumé de test doit porter le verdict réel.
 
 - ⚠️ **Un `ShowDialog()` sur une fenêtre `ShowInTaskbar="False"` + `WindowStyle="ToolWindow"`
   est un blocage définitif en puissance.** Ni barre des tâches, ni Alt-Tab : si elle ne s'affiche

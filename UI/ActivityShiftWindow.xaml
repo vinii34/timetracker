@@ -9,47 +9,51 @@
         ShowActivated="False"
         Background="#FAFAFA">
     <!-- Non modale, dans la barre des tâches et Alt-Tab : si elle ne s'affiche pas là où il
-         regarde, il peut la retrouver — et l'ignorer ne bloque rien (HANDOFF §8). -->
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
-        <StackPanel Margin="18">
-            <TextBlock x:Name="HeaderText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"
-                       Text="Tu as changé de tâche ?"/>
-            <TextBlock x:Name="DetailText" FontSize="12" Foreground="#555" Margin="0,6,0,0" TextWrapping="Wrap"/>
-            <TextBlock x:Name="DominantText" FontSize="11" Foreground="#888" Margin="0,2,0,0" TextWrapping="Wrap"/>
-
-            <RadioButton x:Name="ExistingRadio" Margin="0,12,0,0" GroupName="Choice" Visibility="Collapsed"
-                         VerticalContentAlignment="Center">
-                <TextBlock x:Name="ExistingText" TextWrapping="Wrap"/>
-            </RadioButton>
-
-            <RadioButton x:Name="NewRadio" Margin="0,10,0,0" GroupName="Choice" Content="Nouvelle tâche :"
-                         VerticalContentAlignment="Center"/>
-            <TextBox x:Name="NewNameBox" Margin="20,4,0,0" Padding="6,4" VerticalContentAlignment="Center"
-                     GotKeyboardFocus="NewNameBox_GotKeyboardFocus" TextChanged="NewNameBox_TextChanged"
-                     PreviewKeyDown="NewNameBox_PreviewKeyDown"/>
-            <Button x:Name="HintButton" Visibility="Collapsed" Margin="20,4,0,0" Padding="2,1"
-                    HorizontalAlignment="Left" HorizontalContentAlignment="Left"
-                    Background="Transparent" BorderThickness="0" Cursor="Hand" Click="Hint_Click">
-                <TextBlock x:Name="HintText" FontSize="12" Foreground="#B26A00" TextWrapping="Wrap"/>
-            </Button>
-
-            <!-- Réponse de l'IA : en attente, reçue, ou échouée. -->
-            <Button x:Name="AiButton" Visibility="Collapsed" Margin="0,8,0,0" Padding="2,1"
-                    HorizontalAlignment="Left" HorizontalContentAlignment="Left"
-                    Background="Transparent" BorderThickness="0" Cursor="Hand" Click="Ai_Click">
-                <TextBlock x:Name="AiText" FontSize="12" Foreground="#2D7DD2" TextWrapping="Wrap"/>
-            </Button>
-
-            <CheckBox x:Name="BackdateCheck" Margin="0,12,0,0" IsChecked="True"/>
-
-            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,14,0,0">
-                <Button x:Name="StayButton" Padding="12,5" Margin="0,0,8,0" Click="Stay_Click"/>
-                <Button x:Name="SwitchButton" Content="Basculer" Padding="14,5" IsDefault="True"
-                        Click="Switch_Click"/>
-            </StackPanel>
-
-            <TextBlock x:Name="SentText" FontSize="10" Foreground="#999" Margin="0,12,0,0" TextWrapping="Wrap"
-                       Visibility="Collapsed"/>
+         regarde, il peut la retrouver — et l'ignorer ne bloque rien (HANDOFF §8).
+         Les boutons sont hors du ScrollViewer : quand la réponse de l'IA allonge la fenêtre
+         au-delà de l'écran, c'est le texte qui défile, jamais les boutons qui disparaissent. -->
+    <DockPanel>
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right"
+                    Margin="18,10,18,16">
+            <Button x:Name="StayButton" Padding="12,5" Margin="0,0,8,0" Click="Stay_Click"/>
+            <Button x:Name="SwitchButton" Content="Basculer" Padding="14,5" IsDefault="True"
+                    Click="Switch_Click"/>
         </StackPanel>
-    </ScrollViewer>
+
+        <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="18,18,18,0">
+                <TextBlock x:Name="HeaderText" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"
+                           Text="Tu as changé de tâche ?"/>
+                <TextBlock x:Name="DetailText" FontSize="12" Foreground="#555" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                <TextBlock x:Name="DominantText" FontSize="11" Foreground="#888" Margin="0,2,0,0" TextWrapping="Wrap"/>
+
+                <RadioButton x:Name="ExistingRadio" Margin="0,12,0,0" GroupName="Choice" Visibility="Collapsed"
+                             VerticalContentAlignment="Center">
+                    <TextBlock x:Name="ExistingText" TextWrapping="Wrap"/>
+                </RadioButton>
+
+                <RadioButton x:Name="NewRadio" Margin="0,10,0,0" GroupName="Choice" Content="Nouvelle tâche :"
+                             VerticalContentAlignment="Center"/>
+                <TextBox x:Name="NewNameBox" Margin="20,4,0,0" Padding="6,4" VerticalContentAlignment="Center"
+                         GotKeyboardFocus="NewNameBox_GotKeyboardFocus" TextChanged="NewNameBox_TextChanged"
+                         PreviewKeyDown="NewNameBox_PreviewKeyDown"/>
+                <Button x:Name="HintButton" Visibility="Collapsed" Margin="20,4,0,0" Padding="2,1"
+                        HorizontalAlignment="Left" HorizontalContentAlignment="Left"
+                        Background="Transparent" BorderThickness="0" Cursor="Hand" Click="Hint_Click">
+                    <TextBlock x:Name="HintText" FontSize="12" Foreground="#B26A00" TextWrapping="Wrap"/>
+                </Button>
+
+                <!-- Réponse de l'IA : en attente, reçue, ou échouée ; ce qui est parti juste dessous. -->
+                <Button x:Name="AiButton" Visibility="Collapsed" Margin="0,8,0,0" Padding="2,1"
+                        HorizontalAlignment="Left" HorizontalContentAlignment="Left"
+                        Background="Transparent" BorderThickness="0" Cursor="Hand" Click="Ai_Click">
+                    <TextBlock x:Name="AiText" FontSize="12" Foreground="#2D7DD2" TextWrapping="Wrap"/>
+                </Button>
+                <TextBlock x:Name="SentText" FontSize="10" Foreground="#999" Margin="2,2,0,0" TextWrapping="Wrap"
+                           Visibility="Collapsed"/>
+
+                <CheckBox x:Name="BackdateCheck" Margin="0,12,0,0" IsChecked="True"/>
+            </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
 </Window>

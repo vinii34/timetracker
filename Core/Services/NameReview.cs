@@ -180,11 +180,14 @@ public static class NameReview
         return (applied, skipped);
     }
 
-    /// <summary>Le nom commence-t-il par le préfixe de réunion (« Réunion », « Réunion — sujet ») ?</summary>
+    /// <summary>
+    /// Le nom commence-t-il par un préfixe de réunion (« Réunion », « Réunion — sujet ») ? Celui
+    /// du réglage ou « Réunion » : voir <see cref="TaskSimilarity.MeetingPrefixes"/>.
+    /// </summary>
     public static bool IsMeeting(string name, string meetingName)
     {
         var n = TaskSimilarity.Normalize(name);
-        var m = TaskSimilarity.Normalize(meetingName);
-        return m.Length > 0 && (n == m || n.StartsWith(m + " ", StringComparison.Ordinal));
+        return TaskSimilarity.MeetingPrefixes(meetingName)
+                             .Any(m => n == m || n.StartsWith(m + " ", StringComparison.Ordinal));
     }
 }
