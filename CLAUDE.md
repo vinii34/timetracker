@@ -34,8 +34,14 @@ réveil, en modal, dans une fenêtre absente de la barre des tâches et d'Alt-Ta
 §8 : ⚠️ ne jamais faire un `ShowDialog()` sur une fenêtre que l'utilisateur ne peut pas retrouver,
 et ne rien déclencher tout seul au réveil de veille.
 
-🧪 **v1.7.1 packagée le 2026-09-30, pas encore lancée par l'utilisateur**
-(`%USERPROFILE%\TimeTracker-v1.7.1\` ; retour arrière = relancer sa v1.7). Ses deux retours après une
+🧪 **v1.7.2 packagée le 2026-09-30 à 18:38, pas encore lancée par l'utilisateur**
+(`%USERPROFILE%\TimeTracker-v1.7.2\` ; retour arrière = relancer sa v1.7.1). Seul changement :
+dans le tableau de bord, les totaux par tâche **défilent** au lieu d'écraser le détail, avec une
+**poignée** entre les deux (`FitTotals`, `TotalsSplitter`). Voir `HANDOFF.md` §0 et §8.
+
+🧪 **v1.7.1 packagée le 2026-09-30, lancée par l'utilisateur le 30/09 à 09:20**
+(`%USERPROFILE%\TimeTracker-v1.7.1\` ; retour arrière = relancer sa v1.7). Préfixe de réunion :
+**« Meeting »** depuis le 30/09 (« Meetting » était une faute, corrigée par lui). Ses deux retours après une
 demi-journée de v1.7 : **le focus volé** par les fenêtres qui s'ouvrent seules (rappel, agenda :
 `Activate()`) et **les boutons hors écran** quand l'IA répond. Corrigés (`ShowActivated="False"`,
 `WindowFit.KeepBottomRight`, vérifiés par `--uitest`), plus ce que son journal a montré : préfixe de
@@ -90,10 +96,9 @@ démarrage. Pièges de ce poste : `HANDOFF.md` §8, en tête.
 un grand écran à 100 %. Une fenêtre haute doit avoir un `ScrollViewer` **et**
 `WindowFit.LimitToWorkArea` — `--uitest` le vérifie. Détail en `HANDOFF.md` §8.
 
-**Prochain sujet** : qu'il lance la **v1.7.1**, puis relire son `log.txt` sur les lignes listées
+**Prochain sujet** : relire son `log.txt` (v1.7.1 depuis le 30/09 09:20) sur les lignes listées
 en `HANDOFF.md` §0 (« À lire dans la prochaine collecte », v1.7 et v1.7.1) avant de toucher au
-moindre seuil ; lui demander si « Meetting » est voulu, et lui signaler l'oubli ciblé pour la tâche
-fourre-tout. Ensuite l'**installeur** (étape 8). La v1.4 est validée en réel (4e collecte). Points
+moindre seuil ; lui signaler l'oubli ciblé pour la tâche fourre-tout. Ensuite l'**installeur** (étape 8). La v1.4 est validée en réel (4e collecte). Points
 ouverts en `HANDOFF.md` §0, « Ce qui reste à faire ».
 
 ✅ **Étape 4 (Outlook) livrée et éprouvée.** Lecture de l'agenda par **COM sur l'Outlook

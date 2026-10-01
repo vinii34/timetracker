@@ -2887,6 +2887,67 @@ public partial class App : Application
     }
 
     /// <summary>
+    /// Onglet Jour d'une journée chargée : les totaux défilent, le détail garde au moins autant de
+    /// place qu'eux, et le total de la journée reste dans la fenêtre.
+    /// </summary>
+    private static void CheckDashboardDay(Window window)
+    {
+        window.UpdateLayout();
+        if (window.FindName("EntriesList") is not FrameworkElement entries
+            || window.FindName("TotalsScroll") is not System.Windows.Controls.ScrollViewer totals
+            || window.FindName("GrandTotalText") is not FrameworkElement grand
+            || window.Content is not FrameworkElement content)
+            throw new InvalidOperationException("éléments de l'onglet Jour introuvables");
+
+        // Sans ça, le cas chargé n'est pas atteint et le reste ne prouve rien.
+        if (totals.ExtentHeight <= totals.ViewportHeight)
+            throw new InvalidOperationException(
+                $"les totaux ne défilent pas ({totals.ExtentHeight:F0} ≤ {totals.ViewportHeight:F0})");
+        if (entries.ActualHeight < totals.ActualHeight)
+            throw new InvalidOperationException(
+                $"détail écrasé par les totaux ({entries.ActualHeight:F0} < {totals.ActualHeight:F0})");
+
+        var bottom = grand.TranslatePoint(new System.Windows.Point(0, grand.ActualHeight), content).Y;
+        if (bottom > content.ActualHeight + 1)
+            throw new InvalidOperationException($"total de la journée hors de la fenêtre ({bottom:F0} > {content.ActualHeight:F0})");
+    }
+
+    /// <summary>
+    /// La poignée entre détail et totaux, tirée comme à la souris : elle agrandit les totaux, les
+    /// réduit jusqu'à deux lignes, et s'arrête au minimum du détail sans rien pousser hors de la fenêtre.
+    /// </summary>
+    private static void CheckDashboardSplitter(Window window)
+    {
+        window.UpdateLayout();
+        if (window.FindName("TotalsSplitter") is not System.Windows.Controls.Primitives.Thumb splitter
+            || window.FindName("TotalsScroll") is not FrameworkElement totals
+            || window.FindName("EntriesList") is not FrameworkElement entries
+            || window.FindName("GrandTotalText") is not FrameworkElement grand
+            || window.Content is not FrameworkElement content)
+            throw new InvalidOperationException("éléments de l'onglet Jour introuvables");
+
+        double Drag(double vertical)
+        {
+            splitter.RaiseEvent(new System.Windows.Controls.Primitives.DragDeltaEventArgs(0, vertical));
+            window.UpdateLayout();
+            return totals.ActualHeight;
+        }
+
+        double before = totals.ActualHeight;
+        if (Drag(-30) <= before + 1)
+            throw new InvalidOperationException($"la poignée n'agrandit pas les totaux ({before:F0} → {totals.ActualHeight:F0})");
+        if (Math.Abs(Drag(1000) - 40) > 1)
+            throw new InvalidOperationException($"la poignée ne réduit pas les totaux à deux lignes ({totals.ActualHeight:F0})");
+        Drag(-1000);
+        if (entries.ActualHeight < 89)
+            throw new InvalidOperationException($"détail sous sa hauteur minimale ({entries.ActualHeight:F0})");
+
+        var bottom = grand.TranslatePoint(new System.Windows.Point(0, grand.ActualHeight), content).Y;
+        if (bottom > content.ActualHeight + 1)
+            throw new InvalidOperationException($"total de la journée hors de la fenêtre ({bottom:F0} > {content.ActualHeight:F0})");
+    }
+
+    /// <summary>
     /// Une fenêtre plus haute que l'écran de l'utilisateur doit être défilable, sinon ses
     /// derniers réglages et ses boutons sont hors de portée — c'est ce qui est arrivé à la
     /// fenêtre Paramètres en v1.3, sans même une barre de défilement pour le laisser deviner.
@@ -3142,6 +3203,24 @@ public partial class App : Application
             w.SelectTab(1);
             return w;
         });
+        // Une journée chargée : la liste des totaux, sans limite de hauteur, réduisait le détail à
+        // une ligne (signalé le 2026-09-30). Depuis minuit : toujours le jour affiché.
+        var busyTasks = new[]
+        {
+            "Orvane — recette", "Orvane — support", "Velmora — paramétrage", "Velmora — formation",
+            "Kestrio — migration", "Kestrio — revue des flux", "Contoso — audit", "Contoso — reporting",
+            "Préparation atelier Orvane", "Gen admin, e-mails", "Veille technique", "Point équipe Kestrio"
+        };
+        for (int i = 0; i < busyTasks.Length; i++)
+        {
+            var busyId = _db.StartEntry(_db.GetOrCreateTask(busyTasks[i]).Id, DateTime.Now.Date.AddMinutes(3 * i));
+            _db.EndEntry(busyId, DateTime.Now.Date.AddMinutes(3 * i + 2));
+        }
+        Render("Dashboard/Jour chargé", () => new DashboardWindow(_db, _settings, BuildUiTestActions(timer)),
+            CheckDashboardDay);
+        // En dernier : le choix fait à la poignée est statique, il suivrait les fenêtres rendues après.
+        Render("Dashboard/Jour poignée", () => new DashboardWindow(_db, _settings, BuildUiTestActions(timer)),
+            CheckDashboardSplitter);
 
         timer.Flush();
         Logger.Info($"UITEST {(results.Any(r => r.Contains("ÉCHEC")) ? "ÉCHEC" : "OK")} : {string.Join(", ", results)}");

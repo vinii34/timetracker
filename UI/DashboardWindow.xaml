@@ -76,11 +76,16 @@
 
             <!-- ================================================ Jour -->
             <TabItem Header="Jour">
-                <Grid Margin="10">
+                <Grid Margin="10" SizeChanged="DayGrid_SizeChanged">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
+                        <!-- Détail et totaux se partagent la hauteur, en étoiles tous les deux : c'est la
+                             grille qui les borne, et la liste des totaux défile au lieu d'écraser le
+                             détail. Les poids sont posés par FitTotals. -->
+                        <RowDefinition x:Name="EntriesRow" Height="*" MinHeight="90"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition x:Name="TotalsRow" Height="0*"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
@@ -130,13 +135,34 @@
                         </ListView.View>
                     </ListView>
 
-                    <TextBlock Grid.Row="2" Text="Total par tâche" FontWeight="SemiBold" Margin="0,14,0,4"/>
-                    <Grid Grid.Row="3">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                        <ItemsControl Grid.Row="0" x:Name="TotalsList">
+                    <!-- Poignée : un Thumb et non un GridSplitter, qui fixerait des hauteurs en
+                         pixels et laisserait du vide sous des totaux plus courts que la zone. -->
+                    <Thumb Grid.Row="2" x:Name="TotalsSplitter" Height="10" Margin="0,4,0,0"
+                           Cursor="SizeNS" DragDelta="TotalsSplitter_DragDelta"
+                           ToolTip="Glisser pour agrandir le détail ou les totaux">
+                        <Thumb.Template>
+                            <ControlTemplate TargetType="Thumb">
+                                <Border Background="Transparent">
+                                    <Border x:Name="Grip" Width="44" Height="4" CornerRadius="2"
+                                            Background="#C8C8C8"
+                                            HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="Grip" Property="Background" Value="#8A8A8A"/>
+                                    </Trigger>
+                                    <Trigger Property="IsDragging" Value="True">
+                                        <Setter TargetName="Grip" Property="Background" Value="#5A5A5A"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Thumb.Template>
+                    </Thumb>
+
+                    <TextBlock Grid.Row="3" Text="Total par tâche" FontWeight="SemiBold" Margin="0,2,0,4"/>
+                    <ScrollViewer Grid.Row="4" x:Name="TotalsScroll" VerticalScrollBarVisibility="Auto"
+                                  ScrollChanged="TotalsScroll_ScrollChanged">
+                        <ItemsControl x:Name="TotalsList">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <DockPanel Margin="0,2">
@@ -149,9 +175,9 @@
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <TextBlock Grid.Row="1" x:Name="GrandTotalText" FontWeight="Bold"
-                                   Margin="0,8,0,0" FontSize="14"/>
-                    </Grid>
+                    </ScrollViewer>
+                    <TextBlock Grid.Row="5" x:Name="GrandTotalText" FontWeight="Bold"
+                               Margin="0,8,0,0" FontSize="14"/>
                 </Grid>
             </TabItem>
 
