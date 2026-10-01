@@ -12,6 +12,10 @@ un titre entier) pour proposer des noms de tâche.
 plus la gestion de la bibliothèque de tâches et le pilotage depuis le tableau de bord.
 La reconnaissance vocale a été **abandonnée** (précision insuffisante) et retirée du code.
 
+**v1.7.2** (2026-09-30) — tableau de bord : une journée chargée n'écrase plus le détail. Les
+totaux par tâche **défilent** au-delà de 40 % de la hauteur, et une **poignée** entre le détail et
+les totaux permet de régler le partage.
+
 **v1.7.1** (2026-09-30) — premiers retours sur la v1.7 : les fenêtres qui s'ouvrent seules
 (rappel, question d'agenda, changement de tâche) **ne prennent plus le focus** ; la fenêtre de
 changement **ne déborde plus de l'écran** quand la réponse de l'IA arrive ; elle propose **la tâche

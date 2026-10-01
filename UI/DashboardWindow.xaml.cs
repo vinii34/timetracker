@@ -2,6 +2,7 @@ using System.Data;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Threading;
 using TimeTracker.Core.Models;
 using TimeTracker.Core.Services;
@@ -57,6 +58,21 @@ public partial class DashboardWindow : Window
     /// le DataGrid régénérerait ses colonnes en boucle.
     /// </summary>
     private string _weekSignature = "";
+
+    /// <summary>
+    /// Part de la hauteur partagée (détail + totaux) que les totaux prennent au plus tant que la
+    /// poignée n'a pas servi. Au-delà, ils défilent : le détail passe avant.
+    /// </summary>
+    private const double DefaultTotalsShare = 0.4;
+
+    /// <summary>Plancher de la zone des totaux à la poignée (deux lignes) : elle ne disparaît pas.</summary>
+    private const double MinTotalsHeight = 40;
+
+    /// <summary>
+    /// Hauteur des totaux choisie à la poignée, null tant qu'elle n'a pas servi. Statique : le
+    /// tableau de bord est recréé à chaque ouverture, le choix tient jusqu'à la fermeture de l'appli.
+    /// </summary>
+    private static double? _chosenTotalsHeight;
 
     /// <summary>
     /// <paramref name="actions"/> câble la barre de suivi ; omis (ex. <c>--uitest</c>),
@@ -257,6 +273,39 @@ public partial class DashboardWindow : Window
                                    (grand >= dayGoal ? " ✓" : $" (reste {ExportService.FormatHm(dayGoal - grand)})");
         }
         UpdateStatus(entries.Count);
+    }
+
+    /// <summary>
+    /// Donne aux totaux leur hauteur naturelle, plafonnée (part par défaut ou choix à la poignée),
+    /// et le reste au détail. Des poids en étoiles et non des pixels : la grille garde la main sur
+    /// la hauteur disponible, donc rien ne déborde quand la fenêtre rétrécit.
+    /// </summary>
+    private void FitTotals()
+    {
+        double shared = EntriesRow.ActualHeight + TotalsRow.ActualHeight;
+        if (shared <= 0) return;   // onglet Jour pas affiché : rien à répartir
+
+        double cap = _chosenTotalsHeight ?? shared * DefaultTotalsShare;
+        double totals = Math.Clamp(Math.Min(cap, TotalsScroll.ExtentHeight),
+                                   0, Math.Max(0, shared - EntriesRow.MinHeight));
+        EntriesRow.Height = new GridLength(shared - totals, GridUnitType.Star);
+        TotalsRow.Height = new GridLength(totals, GridUnitType.Star);
+    }
+
+    private void DayGrid_SizeChanged(object sender, SizeChangedEventArgs e) => FitTotals();
+
+    private void TotalsScroll_ScrollChanged(object sender, ScrollChangedEventArgs e)
+    {
+        // Une tâche de plus ou de moins dans la journée : la hauteur naturelle a changé. Pas sur
+        // un simple changement de zone visible, que FitTotals provoque lui-même.
+        if (e.ExtentHeightChange != 0) FitTotals();
+    }
+
+    private void TotalsSplitter_DragDelta(object sender, DragDeltaEventArgs e)
+    {
+        // Vers le haut (VerticalChange négatif), les totaux grandissent.
+        _chosenTotalsHeight = Math.Max(MinTotalsHeight, TotalsRow.ActualHeight - e.VerticalChange);
+        FitTotals();
     }
 
     private void PrevDay_Click(object sender, RoutedEventArgs e) { _day = _day.AddDays(-1); LoadDay(); }

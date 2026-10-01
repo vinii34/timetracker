@@ -2,12 +2,13 @@
 
 > Pour reprendre le projet dans une nouvelle session. Lis d'abord ce fichier,
 > puis `README.md`. `CLAUDE.md` (chargé automatiquement) en donne le résumé et pointe ici.
-> État au **2026-09-30** : **v1.7.1 packagée**, pas encore lancée par l'utilisateur — deux bugs
+> État au **2026-09-30** : **v1.7.1 packagée et lancée par l'utilisateur** (09:20) — deux bugs
 > qu'il a signalés après une demi-journée de v1.7 (focus volé, boutons hors écran) et ce que son
 > `log.txt` du 29-30/09 a montré. Voir §0, « Premiers retours sur la v1.7 ». Avant : **4e collecte
 > dépouillée** (2026-09-17 → 29) et **suggestions refaites en v1.7**, section « 4e collecte ».
 > Le projet tourne désormais **sur le poste de travail** (celui du vrai relevé) : pièges propres
-> à ce poste en §8.
+> à ce poste en §8. Le 30/09 à 18:38, **v1.7.2 packagée** (détail du tableau de bord écrasé par
+> les totaux, signalé l'après-midi) — voir la fin de « Premiers retours sur la v1.7 ».
 
 ---
 
@@ -101,14 +102,38 @@ recalage sur `SizeChanged`, 4 cas `ActivityShiftWindow` échouent ; avec `ShowAc
 sur le rappel, ses 2 cas échouent.
 
 **Paquet v1.7.1** : `%USERPROFILE%\TimeTracker-v1.7.1\TimeTracker.exe` (72 Mo), `--selftest` et
-`--uitest` verts **sur l'exe publié**. **Pas lancé** : c'est à lui de quitter la v1.7 et de lancer
-celle-ci (le démarrage avec Windows suivra). Retour arrière : relancer la v1.7.
+`--uitest` verts **sur l'exe publié**. **Lancé par lui le 30/09 à 09:20** (le démarrage avec
+Windows pointe donc vers la v1.7.1). Retour arrière : relancer la v1.7.
 
 ⚠️ **À lire dans la prochaine collecte**, en plus de la liste de la v1.7 plus bas : la part de
 `(reprise)` dans les propositions et combien sont acceptées ; le rang choisi dans le sélecteur
 (la tâche d'avant devrait être au rang ★+1, soit 3 chez lui) ; les `nouvel essai dans 3 s` et
-leur issue. Et **lui demander** si « Meetting » est voulu (sinon : « Meeting » ou « Réunion » dans
-Paramètres ; rien n'est à rattraper en base tant qu'aucune réunion n'a été nommée avec).
+leur issue.
+
+**Réglé le 30/09 à 09:35** : « Meetting » était une faute pour **« Meeting »**, corrigée par lui
+dans les Paramètres. Il tournait déjà sur la v1.7.1 (lancée à 09:20) ; une réunion avait eu le
+temps d'être nommée « Meetting — Weekly… », qu'il a renommée puis fusionnée avec l'ancienne
+« Réunion — … » via « Noms à vérifier » — le parcours prévu. Désormais chaque réunion récurrente
+crée une fois sa tâche « Meeting — sujet », et le bandeau propose (coché) d'y fusionner l'ancienne
+« Réunion — sujet ». Premier choix dans le sélecteur v1.7.1 : la tâche d'avant, **rang 3**.
+
+**Signalé le 30/09 après-midi — tableau de bord, onglet Jour** (captures à l'appui, 16 entrées et
+10 tâches) : « Total par tâche » en hauteur libre **réduisait le détail à une ligne**, et rien ne
+permettait d'agrandir la zone, sauf la fenêtre. Corrigé en **v1.7.2**, packagée le 30/09 à 18:38
+(`%USERPROFILE%\TimeTracker-v1.7.2\TimeTracker.exe`, 72 Mo, `--selftest` et `--uitest` verts
+**sur l'exe publié** ; `<Version>` du `.csproj` passée à 1.7.2 — elle était restée à 1.7.0 pour la
+1.7.1). **Pas encore lancée par lui** : c'est son lancement qui repointera le démarrage avec
+Windows ; retour arrière = relancer la v1.7.1. Seul changement par rapport à la v1.7.1 :
+
+- Détail et totaux sont deux rangées **en étoiles** ; `FitTotals` pose leurs poids : les totaux
+  prennent leur hauteur naturelle (`ExtentHeight` de `TotalsScroll`), plafonnée à **40 %** de la
+  hauteur partagée, puis **défilent** ; le détail garde au moins 90 points. Le total de la journée
+  reste dessous, hors défilement.
+- **Poignée** entre les deux (`TotalsSplitter`, un `Thumb`) : la hauteur choisie tient jusqu'à la
+  fermeture de l'appli (champ statique, rien en base), plancher deux lignes.
+- `--uitest` : `Dashboard/Jour chargé` (12 tâches fictives de plus : les totaux défilent, le détail
+  garde au moins autant de place qu'eux, total visible) et `Dashboard/Jour poignée` (glissés
+  simulés : agrandir, réduire à deux lignes, buter sur le minimum du détail).
 
 ### 4e collecte (2026-09-17 → 29, dépouillée le 2026-09-29) — les suggestions refaites (v1.7)
 
@@ -784,11 +809,11 @@ ou par semaine (retour immédiat de l'utilisateur), Gemini vérifié par lui ave
 
 **v1.7 packagée le 2026-09-29** (`%USERPROFILE%\TimeTracker-v1.7\`), **en test chez
 l'utilisateur** : voir « 4e collecte » plus haut. **v1.7.1 packagée le 2026-09-30**
-(`%USERPROFILE%\TimeTracker-v1.7.1\`), à lancer par lui : voir « Premiers retours sur la v1.7 ».
+(`%USERPROFILE%\TimeTracker-v1.7.1\`), lancée par lui le 30/09 : voir « Premiers retours sur la v1.7 ».
 
 Ensuite, par ordre de priorité (mis à jour le 2026-09-30) :
 
-0. **Qu'il lance la v1.7.1**, puis **relire son `log.txt`** sur les lignes listées dans « À lire
+0. **v1.7.1 lancée par lui le 30/09 à 09:20** : **relire son `log.txt`** sur les lignes listées dans « À lire
    dans la prochaine collecte » (v1.7 et v1.7.1). Ne rien régler à l'aveugle : les seuils de la
    détection n'ont vu qu'une demi-journée de vraies fenêtres (4 propositions : 1 acceptée, 3
    refusées dont 2 à cause du préfixe de réunion). S'il faut des données plus fines (quelles
@@ -797,7 +822,7 @@ Ensuite, par ordre de priorité (mis à jour le 2026-09-30) :
 1. **L'appris pollué n'a pas été effacé.** La tâche fourre-tout garde ses 419 mots ; les
    nouvelles règles de la détection les neutralisent en partie, pas `TaskSuggester`. Depuis la
    v1.7.1, l'oubli ciblé existe (« Gérer les tâches » → « 🧹 Oublier ses fenêtres ») : **le lui
-   signaler**, lui laisser le choix. « Meetting » dans les Paramètres : lui demander si c'est voulu.
+   signaler**, lui laisser le choix. (Préfixe de réunion : « Meeting » depuis le 30/09, réglé.)
 2. **Les « réunions toute la journée »** des 23 et 24/09 (voir plus haut) : attendre que ça se
    reproduise avec `--meetingtrace` pour savoir qui tient le micro.
 3. **S'il coche l'IA d'après les fenêtres** : vérifier dans le journal que les appels passent
@@ -1318,6 +1343,11 @@ capture WASAPI (le vrai problème venait de WinMM), normalisation audio, langue 
   `ScrollViewer`, affiche `(défilable, NNNpts)` quand la vérification mord — pour qu'on voie
   qu'elle n'est pas passée à vide — et rend la fenêtre Paramètres une seconde fois contrainte à
   cette hauteur, ce qui est le seul moyen de voir ici ce que l'utilisateur voit chez lui.
+- **Une liste dans une rangée `Auto` ne défile jamais** : la grille la mesure sans limite de
+  hauteur, et une `MaxHeight` sur la rangée la coupe sans ascenseur. D'où les rangées en étoiles du
+  tableau de bord, poids calculés (`FitTotals`). Pas de `GridSplitter` non plus : entre une rangée
+  étoile et une `Auto`, il fige la seconde en pixels (elle ne suit plus la fenêtre) et ne respecte
+  pas le minimum de la première ; un `Thumb` qui ne fait que changer le plafond suffit.
 - ⚠️ **L'exe n'est pas signé** : SmartScreen affiche « Windows protected your PC » à la première
   exécution. Ce n'est pas l'exe qui est en cause, mais la marque de provenance externe (Mark of
   the Web) — et **elle dépend du mode de transfert**, constaté le 2026-08-09 :
